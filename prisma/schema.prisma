@@ -1,0 +1,292 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String        @id @default(uuid())
+  firstName      String
+  lastName       String
+  email          String        @unique
+  password       String
+  phone          String?
+  position       String?
+  departmentId   String?
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  role           Role          @default(JUNIOR)
+  pricingPerHour Decimal?      @db.Decimal(10, 2)
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Core relations from your schema
+  createdDocuments    Document[]     @relation("DocumentCreator")
+  responsibleDocuments Document[]    @relation("DocumentResponsable")
+  issuedInvoices       Invoice[]     @relation("InvoiceIssuedBy")
+  uploadedFiles        File[]
+  generatedReports     Report[]
+  notifications        Notification[]
+
+  // Task management relations
+  managedDepartments Department[] @relation("DepartmentManager")
+  assignedTasks      Task[]       @relation("TaskAssignee")
+  timeEntries        TimeEntry[]
+
+  @@map("users")
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  colorHex    String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // User relations
+  users    User[]
+  managers User[] @relation("DepartmentManager")
+
+  // Document relations
+  documents Document[]
+
+  @@map("departments")
+}
+
+model Client {
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  phone       String?
+  companyName String?
+  address     String?
+  city        String?
+  country     String?
+  vatNumber   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documents   Document[]
+  invoices    Invoice[]
+
+  @@map("clients")
+}
+
+model Referent {
+  id          String   @id @default(uuid())
+  name        String
+  email       String?
+  phone       String?
+  company     String?
+  position    String?
+  address     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documents   Document[]
+
+  @@map("referents")
+}
+
+model Document {
+  id              String     @id @default(uuid())
+  title           String
+  reference       String     @unique
+  type            String
+  description     String?
+  status          DocumentStatus @default(ACTIVE)
+  budgetAmount    Decimal?   @db.Decimal(14, 2)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  // Core relations
+  referentId      String?
+  referent        Referent?  @relation(fields: [referentId], references: [id])
+
+  responsableId   String?
+  responsable     User?      @relation("DocumentResponsable", fields: [responsableId], references: [id])
+
+  creatorId       String
+  creator         User       @relation("DocumentCreator", fields: [creatorId], references: [id])
+
+  clientId        String?
+  client          Client?    @relation(fields: [clientId], references: [id])
+
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+
+  // Task management relations
+  lists           List[]
+  invoices        Invoice[]
+  reports         Report[]
+  files           File[]
+  auditLogs       AuditLog[]
+
+  @@map("documents")
+}
+
+model List {
+  id           String   @id @default(uuid())
+  name         String
+  description  String?
+  documentId   String
+  document     Document  @relation(fields: [documentId], references: [id])
+  status       ListStatus @default(OPEN)
+  tasks        Task[]
+  dueDate      DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("lists")
+}
+
+model Task {
+  id                 String      @id @default(uuid())
+  title              String
+  description        String?
+  listId             String
+  list               List        @relation(fields: [listId], references: [id])
+  assigneeId         String?
+  assignee           User?       @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  requestedAssignees String[]    @default([])
+  maxTimeHours       Int?
+  timeEntries        TimeEntry[]
+  status             TaskStatus  @default(PENDING)
+  dueDate            DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@map("tasks")
+}
+
+model TimeEntry {
+  id             String   @id @default(uuid())
+  taskId         String
+  task           Task     @relation(fields: [taskId], references: [id])
+  collaboratorId String
+  collaborator   User     @relation(fields: [collaboratorId], references: [id])
+  hoursSpent     Decimal  @db.Decimal(10, 2)
+  description    String?
+  date           DateTime @default(now())
+  invoiced       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  invoiceId      String?
+  invoice        Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@map("time_entries")
+}
+
+model Invoice {
+  id             String     @id @default(uuid())
+  reference      String     @unique
+  amount         Decimal    @db.Decimal(14, 2)
+  taxRate        Decimal?   @db.Decimal(5, 2)
+  issueDate      DateTime   @default(now())
+  dueDate        DateTime?
+  paid           Boolean    @default(false)
+  paymentDate    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Relations
+  documentId     String?
+  document       Document?  @relation(fields: [documentId], references: [id])
+
+  clientId       String?
+  client         Client?    @relation(fields: [clientId], references: [id])
+
+  issuedById     String?
+  issuedBy       User?      @relation("InvoiceIssuedBy", fields: [issuedById], references: [id])
+
+  timeEntries    TimeEntry[]
+
+  @@map("invoices")
+}
+
+model File {
+  id            String    @id @default(uuid())
+  name          String
+  path          String
+  mimeType      String
+  size          Int
+  uploadedById  String
+  uploadedBy    User      @relation(fields: [uploadedById], references: [id])
+  documentId    String?
+  document      Document? @relation(fields: [documentId], references: [id])
+  createdAt     DateTime  @default(now())
+
+  @@map("files")
+}
+
+model Report {
+  id             String     @id @default(uuid())
+  title          String
+  content        String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  documentId     String?
+  document       Document?  @relation(fields: [documentId], references: [id])
+
+  generatedById  String?
+  generatedBy    User?      @relation(fields: [generatedById], references: [id])
+
+  @@map("reports")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id])
+  action     String
+  message    String
+  createdAt  DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  message   String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+enum Role {
+  ADMIN
+  ASSOCIATE
+  SENIOR
+  MID
+  JUNIOR
+  BOARD
+}
+
+enum DocumentStatus {
+  ACTIVE
+  ARCHIVED
+  CLOSED
+}
+
+enum ListStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CLOSED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
