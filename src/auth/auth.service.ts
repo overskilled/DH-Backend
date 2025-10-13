@@ -321,6 +321,7 @@ export class AuthService {
             await prisma.file.deleteMany({
                 where: { uploadedById: userId }
             });
+            
 
             // Handle report relations
             await prisma.report.updateMany({

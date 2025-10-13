@@ -4,6 +4,10 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
+import { DocumentsModule } from './documents/documents.module';
+import { TimeEntryModule } from './time-entry/time-entry.module';
+import { TasksModule } from './tasks/tasks.module';
+import { ListsModule } from './lists/lists.module';
 
 @Module({
   imports: [
@@ -13,6 +17,10 @@ import { AuthModule } from './auth/auth.module';
     }),
     UsersModule,
     AuthModule,
+    DocumentsModule,
+    ListsModule,
+    TasksModule,
+    TimeEntryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
