@@ -142,6 +142,7 @@ export class AuthService {
 
         const { password, ...safeUser } = dbUser;
 
+        
         return {
             accessToken,
             userId: dbUser.id,

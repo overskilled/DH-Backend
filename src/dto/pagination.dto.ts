@@ -1,30 +1,58 @@
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsInt, IsOptional, Max, Min, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class PaginationDto {
+    @ApiProperty({ default: 1, minimum: 1 })
     @Type(() => Number)
     @IsInt()
     @Min(1)
-    page: number;
+    page: number = 1;
 
+    @ApiProperty({ default: 10, minimum: 1, maximum: 50 })
     @Type(() => Number)
     @IsInt()
     @Min(1)
-    @Max(20)
-    limit: number;
+    @Max(50)
+    limit: number = 10;
 
+    @ApiPropertyOptional()
+    @IsString()
+    @IsOptional()
+    search?: string;
 
+    @ApiPropertyOptional()
+    @IsString()
+    @IsOptional()
+    sortBy?: string;
+
+    @ApiPropertyOptional({ enum: ['asc', 'desc'] })
+    @IsString()
+    @IsOptional()
+    sortOrder?: 'asc' | 'desc';
 }
 
 export class PaginatedResponse<T> {
+    @ApiProperty()
     data: T[];
+
+    @ApiProperty()
     currentPage: number;
+
+    @ApiProperty()
     totalPages: number;
+
+    @ApiProperty()
     remainingPages: number;
+
+    @ApiProperty()
     totalItems: number;
+
+    @ApiProperty()
     itemsPerPage: number;
+
+    @ApiProperty()
     hasMore: boolean;
-    sort: any;
 
     constructor(data: T[], total: number, dto: PaginationDto) {
         const page = dto.page || 1;

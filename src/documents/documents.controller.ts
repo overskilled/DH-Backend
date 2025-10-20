@@ -15,13 +15,13 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery, ApiResponse } from '@ne
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
-
-import { DocumentResponseDto, DocumentDetailResponseDto } from './dto/document-response.dto';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
+import { PaginationDto } from 'src/dto/pagination.dto';
 import { CreateListDto } from 'src/lists/dto/create-list.dto';
 import { CreateTaskDto } from 'src/tasks/dto/create-task.dto';
-import { UpdateTaskDto } from 'src/tasks/dto/update-task.dto';
 import { CreateTimeEntryDto } from 'src/time-entry/dto/create-time-entry.dto';
+import { UpdateTaskDto } from 'src/tasks/dto/update-task.dto';
+
 
 @ApiTags('documents')
 @ApiBearerAuth('JWT-auth')
@@ -42,16 +42,36 @@ export class DocumentsController {
   @Get()
   @ApiOperation({
     summary: 'Get All Documents',
-    description: 'Get all documents with role-based access control.'
+    description: 'Get all documents with role-based access control and pagination.'
   })
   @ApiQuery({ name: 'status', required: false, enum: ['ACTIVE', 'ARCHIVED', 'CLOSED'] })
   @ApiQuery({ name: 'departmentId', required: false })
   async getAllDocuments(
     @Request() req,
+    @Query() paginationDto: PaginationDto,
     @Query('status') status?: string,
     @Query('departmentId') departmentId?: string,
   ) {
-    return this.documentsService.findAllDocuments(req.user, { status, departmentId });
+    
+    return this.documentsService.findAllDocuments(req.user, paginationDto, { status, departmentId });
+  }
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Search Documents',
+    description: 'Search documents by title, reference, description, client name, or creator name.'
+  })
+  @ApiQuery({ name: 'search', required: true, description: 'Search term' })
+  @ApiQuery({ name: 'status', required: false, enum: ['ACTIVE', 'ARCHIVED', 'CLOSED'] })
+  @ApiQuery({ name: 'departmentId', required: false })
+  async searchDocuments(
+    @Request() req,
+    @Query('search') search: string,
+    @Query() paginationDto: PaginationDto,
+    @Query('status') status?: string,
+    @Query('departmentId') departmentId?: string,
+  ) {
+    return this.documentsService.searchDocuments(req.user, search, paginationDto, { status, departmentId });
   }
 
   @Get(':id')
@@ -86,6 +106,19 @@ export class DocumentsController {
   }
 
   // List Management Endpoints
+  @Get(':documentId/lists')
+  @ApiOperation({
+    summary: 'Get Document Lists',
+    description: 'Get all lists for a document with pagination.'
+  })
+  async getDocumentLists(
+    @Request() req,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    return this.documentsService.findListsByDocument(req.user, documentId, paginationDto);
+  }
+
   @Post('lists')
   @ApiOperation({
     summary: 'Create List',
@@ -109,6 +142,23 @@ export class DocumentsController {
   }
 
   // Task Management Endpoints
+  @Get('lists/:listId/tasks')
+  @ApiOperation({
+    summary: 'Get List Tasks',
+    description: 'Get all tasks for a list with pagination and filtering.'
+  })
+  @ApiQuery({ name: 'status', required: false, enum: ['PENDING', 'IN_PROGRESS', 'DONE', 'CANCELLED'] })
+  @ApiQuery({ name: 'assigneeId', required: false })
+  async getListTasks(
+    @Request() req,
+    @Param('listId', ParseUUIDPipe) listId: string,
+    @Query() paginationDto: PaginationDto,
+    @Query('status') status?: string,
+    @Query('assigneeId') assigneeId?: string,
+  ) {
+    return this.documentsService.findTasksByList(req.user, listId, paginationDto, { status, assigneeId });
+  }
+
   @Post('tasks')
   @ApiOperation({
     summary: 'Create Task',
@@ -126,7 +176,7 @@ export class DocumentsController {
   async updateTask(
     @Request() req,
     @Param('taskId', ParseUUIDPipe) taskId: string,
-    @Body() updateTaskDto: any,
+    @Body() updateTaskDto: UpdateTaskDto,
   ) {
     return this.documentsService.updateTask(req.user, taskId, updateTaskDto);
   }
@@ -145,6 +195,19 @@ export class DocumentsController {
   }
 
   // Time Entry Endpoints
+  @Get('tasks/:taskId/time-entries')
+  @ApiOperation({
+    summary: 'Get Task Time Entries',
+    description: 'Get all time entries for a task with pagination.'
+  })
+  async getTaskTimeEntries(
+    @Request() req,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    return this.documentsService.findTimeEntriesByTask(req.user, taskId, paginationDto);
+  }
+
   @Post('time-entries')
   @ApiOperation({
     summary: 'Create Time Entry',
@@ -153,7 +216,7 @@ export class DocumentsController {
   async createTimeEntry(@Request() req, @Body() createTimeEntryDto: CreateTimeEntryDto) {
     return this.documentsService.createTimeEntry(req.user, createTimeEntryDto);
   }
- 
+
   // User-specific endpoints
   @Get('my/tasks')
   @ApiOperation({
@@ -161,8 +224,12 @@ export class DocumentsController {
     description: 'Get tasks assigned to the current user or where user is requested.'
   })
   @ApiQuery({ name: 'status', required: false, enum: ['PENDING', 'IN_PROGRESS', 'DONE', 'CANCELLED'] })
-  async getMyTasks(@Request() req, @Query('status') status?: string) {
-    return this.documentsService.getMyTasks(req.user, status);
+  async getMyTasks(
+    @Request() req,
+    @Query() paginationDto: PaginationDto,
+    @Query('status') status?: string,
+  ) {
+    return this.documentsService.getMyTasks(req.user, paginationDto, status);
   }
 
   @Get('department/tasks')
@@ -170,7 +237,11 @@ export class DocumentsController {
     summary: 'Get Department Tasks',
     description: 'Get all tasks in user\'s department. Access: Board, Associates, or Department Managers.'
   })
-  async getDepartmentTasks(@Request() req, @Query('departmentId') departmentId?: string) {
-    return this.documentsService.getDepartmentTasks(req.user, departmentId);
+  async getDepartmentTasks(
+    @Request() req,
+    @Query() paginationDto: PaginationDto,
+    @Query('departmentId') departmentId?: string,
+  ) {
+    return this.documentsService.getDepartmentTasks(req.user, paginationDto, departmentId);
   }
 }

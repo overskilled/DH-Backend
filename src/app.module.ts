@@ -8,6 +8,7 @@ import { DocumentsModule } from './documents/documents.module';
 import { TimeEntryModule } from './time-entry/time-entry.module';
 import { TasksModule } from './tasks/tasks.module';
 import { ListsModule } from './lists/lists.module';
+import { DepartementsModule } from './departements/departements.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ListsModule } from './lists/lists.module';
     ListsModule,
     TasksModule,
     TimeEntryModule,
+    DepartementsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
