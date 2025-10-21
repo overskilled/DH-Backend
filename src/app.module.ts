@@ -9,6 +9,7 @@ import { TimeEntryModule } from './time-entry/time-entry.module';
 import { TasksModule } from './tasks/tasks.module';
 import { ListsModule } from './lists/lists.module';
 import { DepartementsModule } from './departements/departements.module';
+import { ClientsModule } from './clients/clients.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { DepartementsModule } from './departements/departements.module';
     TasksModule,
     TimeEntryModule,
     DepartementsModule,
+    ClientsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

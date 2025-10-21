@@ -1,517 +1,623 @@
-import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
+import { CreateListDto } from '../lists/dto/create-list.dto';
+import { CreateTaskDto } from '../tasks/dto/create-task.dto';
+import { UpdateTaskDto } from '../tasks/dto/update-task.dto';
+import { CreateTimeEntryDto } from '../time-entry/dto/create-time-entry.dto';
 import { PrismaService } from 'prisma/prisma.service';
-import { PaginatedResponse, PaginationDto } from 'src/dto/pagination.dto';
-import { CreateListDto } from 'src/lists/dto/create-list.dto';
-import { CreateTaskDto } from 'src/tasks/dto/create-task.dto';
-import { UpdateTaskDto } from 'src/tasks/dto/update-task.dto';
-import { CreateTimeEntryDto } from 'src/time-entry/dto/create-time-entry.dto';
 import { DocumentStatus, ListStatus, TaskStatus } from '@prisma/client';
 
 @Injectable()
 export class DocumentsService {
   constructor(private prisma: PrismaService) { }
 
-  private hasDocumentAccess(user: any, document: any, requiredRole: 'view' | 'edit' | 'manage' = 'view') {
-    // Board members have full access
-    if (user.role === 'BOARD') return true;
+  // NEW: Get documents with client and referent information (for dossier page)
+  async findAllDocuments(user: any, paginationDto: any, filters?: { status?: string; departmentId?: string }) {
 
-    // Associates have full access to documents
-    if (user.role === 'ASSOCIATE') return true;
-
-    // Document creator and responsable have full access
-    if (document.creatorId === user.id || document.responsableId === user.id) {
-      return true;
-    }
-
-    // Department members can view documents in their department
-    if (requiredRole === 'view' && document.departmentId === user.departmentId) {
-      return true;
-    }
-
-    return false;
-  }
-
-  private canManageTasks(user: any, task?: any) {
-    if (user.role === 'BOARD' || user.role === 'ASSOCIATE') return true;
-
-    // Task assignee can manage their own tasks
-    if (task && task.assigneeId === user.id) return true;
-
-    // Document responsable can manage tasks in their documents
-    if (task && task.list.document.responsableId === user.id) return true;
-
-    return false;
-  }
-
-  async createDocument(userId: string, createDocumentDto: CreateDocumentDto) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-
-    // Only Board and Associates can create documents
-    if (user?.role !== 'BOARD' && user?.role !== 'ASSOCIATE') {
-      throw new ForbiddenException('Insufficient permissions to create documents');
-    }
-
-    return this.prisma.document.create({
-      data: {
-        ...createDocumentDto,
-        creatorId: userId,
-        status: 'ACTIVE',
-      },
-      include: {
-        creator: true,
-        responsable: true,
-        client: true,
-        department: true,
-        referent: true,
-      },
-    });
-  }
-
-  async findAllDocuments(
-    user: any,
-    paginationDto: PaginationDto,
-    filters?: { status?: string; departmentId?: string }
-  ) {
-    const { search, sortBy = 'createdAt', sortOrder = 'desc' } = paginationDto;
     const page = Number(paginationDto.page) || 1;
     const limit = Number(paginationDto.limit) || 10;
 
     const skip = (page - 1) * limit;
     const take = limit;
 
+
     const where: any = {};
 
-    if (filters?.status) {
-      where.status = filters.status;
+    // Apply filters
+    if (filters?.status) where.status = filters.status;
+    if (filters?.departmentId) where.departmentId = filters.departmentId;
+
+    // Role-based access control
+    if (!['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role)) {
+      where.departmentId = user.departmentId;
     }
 
-    if (filters?.departmentId) {
-      where.departmentId = filters.departmentId;
-    }
+    const documents = await this.prisma.document.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        client: true,
+        referent: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          }
+        },
+        department: true,
+        responsable: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          }
+        },
+        lists: {
+          include: {
+            tasks: {
+              include: {
+                timeEntries: true
+              }
+            }
+          }
+        },
+        invoices: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    // Search functionality
-    if (search) {
-      where.OR = [
+    // Calculate spent amount from time entries and invoices
+    const documentsWithSpent = documents.map(doc => {
+      const totalHours = doc.lists.flatMap(list =>
+        list.tasks.flatMap(task =>
+          task.timeEntries.map(entry => parseFloat(entry.hoursSpent.toString()))
+        )
+      ).reduce((sum, hours) => sum + hours, 0);
+
+      const totalInvoiced = doc.invoices.reduce((sum, invoice) =>
+        sum + parseFloat(invoice.amount.toString()), 0
+      );
+
+      return {
+        ...doc,
+        spent: totalInvoiced, // or calculate based on your business logic
+        progress: doc.budgetAmount ? (totalInvoiced / parseFloat(doc.budgetAmount.toString())) * 100 : 0
+      };
+    });
+
+    const total = await this.prisma.document.count({ where });
+
+    return {
+      data: documentsWithSpent,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
+  }
+
+  // NEW: Search documents with comprehensive search
+  async searchDocuments(user: any, search: string, paginationDto: any, filters?: { status?: string; departmentId?: string }) {
+    const { page = 1, limit = 10 } = paginationDto;
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      OR: [
         { title: { contains: search, mode: 'insensitive' } },
-        { reference: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
+        { reference: { contains: search, mode: 'insensitive' } },
         {
           client: {
             name: { contains: search, mode: 'insensitive' }
           }
         },
         {
-          creator: {
+          responsable: {
             OR: [
               { firstName: { contains: search, mode: 'insensitive' } },
               { lastName: { contains: search, mode: 'insensitive' } }
             ]
           }
         }
-      ];
+      ]
+    };
+
+    // Apply filters
+    if (filters?.status) where.status = filters.status;
+    if (filters?.departmentId) where.departmentId = filters.departmentId;
+
+    // Role-based access control
+    if (!['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role)) {
+      where.departmentId = user.departmentId;
     }
 
-    // If user is not Board or Associate, restrict to accessible documents
-    if (user.role !== 'BOARD' && user.role !== 'ASSOCIATE') {
-      where.OR = [
-        { creatorId: user.id },
-        { responsableId: user.id },
-        { departmentId: user.departmentId },
-      ];
-    }
-
-    // Build orderBy
-    const orderBy: any = {};
-    if (sortBy === 'title' || sortBy === 'reference' || sortBy === 'status' || sortBy === 'createdAt' || sortBy === 'updatedAt') {
-      orderBy[sortBy] = sortOrder;
-    } else {
-      orderBy.createdAt = 'desc';
-    }
-
-    const [documents, total] = await Promise.all([
-      this.prisma.document.findMany({
-        where,
-        include: {
-          creator: { select: { id: true, firstName: true, lastName: true, email: true } },
-          responsable: { select: { id: true, firstName: true, lastName: true, email: true } },
-          client: { select: { id: true, name: true, companyName: true } },
-          department: { select: { id: true, name: true, colorHex: true } },
-          lists: {
-            include: {
-              tasks: {
-                include: {
-                  assignee: true,
-                  timeEntries: true,
-                }
+    const documents = await this.prisma.document.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        client: true,
+        referent: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          }
+        },
+        department: true,
+        lists: {
+          include: {
+            tasks: {
+              include: {
+                timeEntries: true
               }
             }
-          },
-          _count: {
-            select: {
-              lists: true,
-              files: true,
-            },
-          },
+          }
         },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      this.prisma.document.count({ where }),
-    ]);
+        invoices: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    return new PaginatedResponse(documents, total, paginationDto);
+    const total = await this.prisma.document.count({ where });
+
+    return {
+      data: documents,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
   }
 
-  async searchDocuments(
-    user: any,
-    search: string,
-    paginationDto: PaginationDto,
-    filters?: { status?: string; departmentId?: string }
-  ) {
-    return this.findAllDocuments(user, { ...paginationDto, search }, filters);
+  // NEW: Update create method to include tags and referent
+  async createDocument(userId: string, createDocumentDto: CreateDocumentDto) {
+    const { tags, referentId, ...documentData } = createDocumentDto;
+
+    return this.prisma.document.create({
+      data: {
+        ...documentData,
+        tags: tags || [],
+        referentId,
+        creatorId: userId,
+      },
+      include: {
+        client: true,
+        referent: true,
+        department: true,
+      }
+    });
   }
 
+  // NEW: Update method to handle tags and referent
+  async updateDocument(user: any, id: string, updateDocumentDto: UpdateDocumentDto) {
+    const document = await this.prisma.document.findUnique({
+      where: { id },
+      include: { creator: true, responsable: true }
+    });
+
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+
+    // Authorization check
+    if (!this.canModifyDocument(user, document)) {
+      throw new ForbiddenException('You do not have permission to update this document');
+    }
+
+    const { tags, ...updateData } = updateDocumentDto;
+
+    return this.prisma.document.update({
+      where: { id },
+      data: {
+        ...updateData,
+        ...(tags !== undefined && { tags }),
+        referentId: updateData.referentId || "",
+        status: updateData.status as DocumentStatus
+      },
+      include: {
+        client: true,
+        referent: true,
+        department: true,
+      }
+    });
+  }
+
+  // NEW: Get document by ID with all relations for dossier detail page
   async findDocumentById(user: any, id: string) {
     const document = await this.prisma.document.findUnique({
       where: { id },
       include: {
-        creator: true,
-        responsable: true,
         client: true,
+        referent: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            position: true,
+          }
+        },
         department: true,
-        referent: true,
+        creator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          }
+        },
+        responsable: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          }
+        },
         lists: {
           include: {
             tasks: {
               include: {
-                assignee: true,
-                timeEntries: true,
-              },
-            },
-          },
+                assignee: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                  }
+                },
+                timeEntries: {
+                  include: {
+                    collaborator: {
+                      select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         },
-        files: true,
         invoices: true,
-        reports: true,
-        auditLogs: {
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
-      },
+        files: true,
+        reports: true
+      }
     });
 
     if (!document) {
       throw new NotFoundException('Document not found');
     }
 
-    if (!this.hasDocumentAccess(user, document, 'view')) {
-      throw new ForbiddenException('Access denied to this document');
+    // Authorization check
+    if (!['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role) && document.departmentId !== user.departmentId) {
+      throw new ForbiddenException('You do not have access to this document');
     }
 
-    return document;
+    // Calculate spent amount and progress
+    const totalInvoiced = document.invoices.reduce((sum, invoice) =>
+      sum + parseFloat(invoice.amount.toString()), 0
+    );
+
+    const totalHours = document.lists.flatMap(list =>
+      list.tasks.flatMap(task =>
+        task.timeEntries.map(entry => parseFloat(entry.hoursSpent.toString()))
+      )
+    ).reduce((sum, hours) => sum + hours, 0);
+
+    return {
+      ...document,
+      spent: totalInvoiced,
+      progress: document.budgetAmount ? (totalInvoiced / parseFloat(document.budgetAmount.toString())) * 100 : 0,
+      totalHours
+    };
   }
 
-  async updateDocument(user: any, id: string, updateDocumentDto: UpdateDocumentDto) {
-    const document = await this.prisma.document.findUnique({
-      where: { id },
-    });
 
-    if (!document) {
-      throw new NotFoundException('Document not found');
-    }
+  // ========== LIST MANAGEMENT ENDPOINTS ==========
 
-    if (!this.hasDocumentAccess(user, document, 'manage')) {
-      throw new ForbiddenException('Insufficient permissions to update this document');
-    }
+  async findListsByDocument(user: any, documentId: string, paginationDto: any) {
+    const { page = 1, limit = 10 } = paginationDto;
+    const skip = (page - 1) * limit;
 
-    // Create audit log for status changes
-    if (updateDocumentDto.status && updateDocumentDto.status !== document.status) {
-      await this.createAuditLog(document.id, user.id, 'STATUS_CHANGE',
-        `Status changed from ${document.status} to ${updateDocumentDto.status}`);
-    }
-
-    return this.prisma.document.update({
-      where: { id },
-      data: { ...updateDocumentDto, referentId: updateDocumentDto.referentId as string, status: updateDocumentDto.status as DocumentStatus },
-      include: {
-        creator: true,
-        responsable: true,
-        client: true,
-        department: true,
-        lists: {
-          include: {
-            tasks: {
-              include: {
-                assignee: true,
-              },
-            },
-          },
-        },
-      },
-    });
-  }
-
-  async deleteDocument(user: any, id: string) {
-    const document = await this.prisma.document.findUnique({
-      where: { id },
-    });
-
-    if (!document) {
-      throw new NotFoundException('Document not found');
-    }
-
-    // Only Board and Associates can delete documents
-    if (user.role !== 'BOARD' && user.role !== 'ASSOCIATE') {
-      throw new ForbiddenException('Insufficient permissions to delete documents');
-    }
-
-    return this.prisma.document.delete({
-      where: { id },
-    });
-  }
-
-  // List Management with Pagination
-  async findListsByDocument(
-    user: any,
-    documentId: string,
-    paginationDto: PaginationDto
-  ) {
+    // First verify document exists and user has access
     const document = await this.prisma.document.findUnique({
       where: { id: documentId },
+      include: { department: true }
     });
 
     if (!document) {
       throw new NotFoundException('Document not found');
     }
 
-    if (!this.hasDocumentAccess(user, document, 'view')) {
-      throw new ForbiddenException('Access denied to this document');
+    // Authorization check
+    if (!['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role) && document.departmentId !== user.departmentId) {
+      throw new ForbiddenException('You do not have access to this document');
     }
 
-    const { sortBy = 'createdAt', sortOrder = 'desc' } = paginationDto;
-    const page = Number(paginationDto.page) || 1;
-    const limit = Number(paginationDto.limit) || 10;
-
-    const skip = (page - 1) * limit;
-    const take = limit;
-
-    const where = { documentId };
-
-    // Build orderBy
-    const orderBy: any = {};
-    if (sortBy === 'name' || sortBy === 'status' || sortBy === 'dueDate' || sortBy === 'createdAt') {
-      orderBy[sortBy] = sortOrder;
-    } else {
-      orderBy.createdAt = 'desc';
-    }
-
-    const [lists, total] = await Promise.all([
-      this.prisma.list.findMany({
-        where,
-        include: {
-          tasks: {
-            include: {
-              assignee: true,
-              timeEntries: true,
+    const lists = await this.prisma.list.findMany({
+      where: { documentId },
+      skip,
+      take: limit,
+      include: {
+        tasks: {
+          include: {
+            assignee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              }
             },
-          },
-        },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      this.prisma.list.count({ where }),
-    ]);
+            timeEntries: {
+              include: {
+                collaborator: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    return new PaginatedResponse(lists, total, paginationDto);
+    const total = await this.prisma.list.count({ where: { documentId } });
+
+    return {
+      data: lists,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
   }
 
   async createList(user: any, createListDto: CreateListDto) {
+    const { documentId, ...listData } = createListDto;
+
+    // Verify document exists and user has permission
     const document = await this.prisma.document.findUnique({
-      where: { id: createListDto.documentId },
+      where: { id: documentId },
+      include: { creator: true, responsable: true }
     });
 
     if (!document) {
       throw new NotFoundException('Document not found');
     }
 
-    if (!this.hasDocumentAccess(user, document, 'manage')) {
-      throw new ForbiddenException('Insufficient permissions to create lists in this document');
+    if (!this.canModifyDocument(user, document)) {
+      throw new ForbiddenException('You do not have permission to create lists in this document');
     }
 
-    const list = await this.prisma.list.create({
+    return this.prisma.list.create({
       data: {
-        ...createListDto,
-        status: 'OPEN',
+        ...listData,
+        documentId,
       },
       include: {
-        document: true,
-        tasks: true,
-      },
+        tasks: {
+          include: {
+            assignee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              }
+            }
+          }
+        }
+      }
     });
-
-    await this.createAuditLog(document.id, user.id, 'LIST_CREATED',
-      `List "${list.name}" created`);
-
-    return list;
   }
 
   async updateListStatus(user: any, listId: string, status: string) {
     const list = await this.prisma.list.findUnique({
       where: { id: listId },
       include: {
-        document: true,
-        tasks: true
-      },
+        document: {
+          include: { creator: true, responsable: true }
+        }
+      }
     });
 
     if (!list) {
       throw new NotFoundException('List not found');
     }
 
-    if (!this.hasDocumentAccess(user, list.document, 'manage')) {
-      throw new ForbiddenException('Insufficient permissions to update this list');
+    if (!this.canModifyDocument(user, list.document)) {
+      throw new ForbiddenException('You do not have permission to update this list');
     }
 
     // Validate status
     const validStatuses = ['OPEN', 'IN_PROGRESS', 'COMPLETED', 'CLOSED'];
     if (!validStatuses.includes(status)) {
-      throw new BadRequestException(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+      throw new BadRequestException('Invalid list status');
     }
 
-    const updatedList = await this.prisma.list.update({
+    return this.prisma.list.update({
       where: { id: listId },
       data: { status: status as ListStatus },
       include: {
-        document: true,
         tasks: {
           include: {
-            assignee: true,
-            timeEntries: true,
-          },
-        },
-      },
+            assignee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              }
+            }
+          }
+        }
+      }
     });
-
-    // Create audit log for status change
-    await this.createAuditLog(
-      list.document.id,
-      user.id,
-      'LIST_STATUS_CHANGE',
-      `List "${list.name}" status changed from ${list.status} to ${status}`
-    );
-
-    return updatedList;
   }
 
-  // Task Management with Pagination
-  async findTasksByList(
-    user: any,
-    listId: string,
-    paginationDto: PaginationDto,
-    filters?: { status?: string; assigneeId?: string }
-  ) {
+  // ========== TASK MANAGEMENT ENDPOINTS ==========
+
+  async findTasksByList(user: any, listId: string, paginationDto: any, filters?: { status?: string; assigneeId?: string }) {
+    const { page = 1, limit = 10 } = paginationDto;
+    const skip = (page - 1) * limit;
+
+    // First verify list and document exist with user access
     const list = await this.prisma.list.findUnique({
       where: { id: listId },
-      include: { document: true },
+      include: {
+        document: {
+          include: { department: true }
+        }
+      }
     });
 
     if (!list) {
       throw new NotFoundException('List not found');
     }
 
-    if (!this.hasDocumentAccess(user, list.document, 'view')) {
-      throw new ForbiddenException('Access denied to this document');
+    // Authorization check
+    if (!['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role) && list.document.departmentId !== user.departmentId) {
+      throw new ForbiddenException('You do not have access to these tasks');
     }
-
-    const { sortBy = 'createdAt', sortOrder = 'desc' } = paginationDto;
-    const page = Number(paginationDto.page) || 1;
-    const limit = Number(paginationDto.limit) || 10;
-
-    const skip = (page - 1) * limit;
-    const take = limit;
 
     const where: any = { listId };
 
-    if (filters?.status) {
-      where.status = filters.status;
-    }
+    // Apply filters
+    if (filters?.status) where.status = filters.status;
+    if (filters?.assigneeId) where.assigneeId = filters.assigneeId;
 
-    if (filters?.assigneeId) {
-      where.assigneeId = filters.assigneeId;
-    }
-
-    // Build orderBy
-    const orderBy: any = {};
-    if (sortBy === 'title' || sortBy === 'status' || sortBy === 'dueDate' || sortBy === 'createdAt') {
-      orderBy[sortBy] = sortOrder;
-    } else {
-      orderBy.createdAt = 'desc';
-    }
-
-    const [tasks, total] = await Promise.all([
-      this.prisma.task.findMany({
-        where,
-        include: {
-          assignee: true,
-          timeEntries: {
-            include: {
-              collaborator: true,
-            },
-          },
-          list: {
-            include: {
-              document: true,
-            },
-          },
+    const tasks = await this.prisma.task.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            department: true
+          }
         },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      this.prisma.task.count({ where }),
-    ]);
+        timeEntries: {
+          include: {
+            collaborator: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              }
+            },
+            invoice: true
+          }
+        },
+        list: {
+          include: {
+            document: {
+              select: {
+                id: true,
+                title: true,
+                reference: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    return new PaginatedResponse(tasks, total, paginationDto);
+    const total = await this.prisma.task.count({ where });
+
+    return {
+      data: tasks,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
   }
 
   async createTask(user: any, createTaskDto: CreateTaskDto) {
+    const { listId, ...taskData } = createTaskDto;
+
+    // Verify list and document exist with user permission
     const list = await this.prisma.list.findUnique({
-      where: { id: createTaskDto.listId },
-      include: { document: true },
+      where: { id: listId },
+      include: {
+        document: {
+          include: { creator: true, responsable: true }
+        }
+      }
     });
 
     if (!list) {
       throw new NotFoundException('List not found');
     }
 
-    if (!this.hasDocumentAccess(user, list.document, 'manage')) {
-      throw new ForbiddenException('Insufficient permissions to create tasks in this document');
+    if (!this.canModifyDocument(user, list.document)) {
+      throw new ForbiddenException('You do not have permission to create tasks in this document');
     }
 
-    const task = await this.prisma.task.create({
+    // If assignee is specified, verify they exist
+    if (taskData.assigneeId) {
+      const assignee = await this.prisma.user.findUnique({
+        where: { id: taskData.assigneeId }
+      });
+      if (!assignee) {
+        throw new NotFoundException('Assignee not found');
+      }
+    }
+
+    return this.prisma.task.create({
       data: {
-        ...createTaskDto,
-        status: 'PENDING',
+        ...taskData,
+        listId,
+        status: taskData.status as TaskStatus
       },
       include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            department: true
+          }
+        },
         list: {
           include: {
-            document: true,
-          },
-        },
-        assignee: true,
-        timeEntries: true,
-      },
+            document: {
+              select: {
+                id: true,
+                title: true,
+                reference: true
+              }
+            }
+          }
+        }
+      }
     });
-
-    await this.createAuditLog(list.document.id, user.id, 'TASK_CREATED',
-      `Task "${task.title}" created in list "${list.name}"`);
-
-    return task;
   }
 
   async updateTask(user: any, taskId: string, updateTaskDto: Partial<CreateTaskDto>) {
@@ -520,38 +626,75 @@ export class DocumentsService {
       include: {
         list: {
           include: {
-            document: true,
-          },
+            document: {
+              include: { creator: true, responsable: true }
+            }
+          }
         },
-      },
+        assignee: true
+      }
     });
 
     if (!task) {
       throw new NotFoundException('Task not found');
     }
 
-    if (!this.canManageTasks(user, task)) {
-      throw new ForbiddenException('Insufficient permissions to update this task');
+    // Authorization: User can update if they are admin/associate/board, document responsible, or task assignee
+    const canUpdate =
+      ['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role) ||
+      task.list.document.responsableId === user.id ||
+      task.assigneeId === user.id;
+
+    if (!canUpdate) {
+      throw new ForbiddenException('You do not have permission to update this task');
     }
 
-    // Create audit log for status changes
-    if (updateTaskDto.status && updateTaskDto.status !== task.status) {
-      await this.createAuditLog(task.list.document.id, user.id, 'TASK_STATUS_CHANGE',
-        `Task "${task.title}" status changed from ${task.status} to ${updateTaskDto.status}`);
+    // If changing assignee, verify new assignee exists
+    if (updateTaskDto.assigneeId) {
+      const assignee = await this.prisma.user.findUnique({
+        where: { id: updateTaskDto.assigneeId }
+      });
+      if (!assignee) {
+        throw new NotFoundException('Assignee not found');
+      }
     }
 
     return this.prisma.task.update({
       where: { id: taskId },
-      data: { ...updateTaskDto, listId: updateTaskDto.listId as string, status: updateTaskDto.status as TaskStatus },
+      data: { ...updateTaskDto, listId: updateTaskDto.listId || '', status: updateTaskDto.status as TaskStatus },
       include: {
-        list: true,
-        assignee: true,
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            department: true
+          }
+        },
+        list: {
+          include: {
+            document: {
+              select: {
+                id: true,
+                title: true,
+                reference: true
+              }
+            }
+          }
+        },
         timeEntries: {
           include: {
-            collaborator: true,
-          },
-        },
-      },
+            collaborator: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              }
+            }
+          }
+        }
+      }
     });
   }
 
@@ -561,263 +704,330 @@ export class DocumentsService {
       include: {
         list: {
           include: {
-            document: true,
-          },
-        },
-      },
+            document: {
+              include: { creator: true, responsable: true }
+            }
+          }
+        }
+      }
     });
 
     if (!task) {
       throw new NotFoundException('Task not found');
     }
 
-    if (!this.hasDocumentAccess(user, task.list.document, 'manage')) {
-      throw new ForbiddenException('Insufficient permissions to assign tasks in this document');
+    if (!this.canModifyDocument(user, task.list.document)) {
+      throw new ForbiddenException('You do not have permission to assign tasks in this document');
     }
 
+    // Verify assignee exists
     const assignee = await this.prisma.user.findUnique({
-      where: { id: assigneeId },
+      where: { id: assigneeId }
     });
-
     if (!assignee) {
       throw new NotFoundException('Assignee not found');
     }
 
-    const updatedTask = await this.prisma.task.update({
+    return this.prisma.task.update({
       where: { id: taskId },
       data: { assigneeId },
       include: {
-        assignee: true,
-        list: true,
-      },
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            department: true
+          }
+        },
+        list: {
+          include: {
+            document: {
+              select: {
+                id: true,
+                title: true,
+                reference: true
+              }
+            }
+          }
+        }
+      }
     });
-
-    await this.createAuditLog(task.list.document.id, user.id, 'TASK_ASSIGNED',
-      `Task "${task.title}" assigned to ${assignee.firstName} ${assignee.lastName}`);
-
-    return updatedTask;
   }
 
-  // Time Entry Management with Pagination
-  async findTimeEntriesByTask(
-    user: any,
-    taskId: string,
-    paginationDto: PaginationDto
-  ) {
+  // ========== TIME ENTRY ENDPOINTS ==========
+
+  async findTimeEntriesByTask(user: any, taskId: string, paginationDto: any) {
+    const { page = 1, limit = 10 } = paginationDto;
+    const skip = (page - 1) * limit;
+
+    // Verify task and document exist with user access
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
         list: {
           include: {
-            document: true,
-          },
-        },
-      },
+            document: {
+              include: { department: true }
+            }
+          }
+        }
+      }
     });
 
     if (!task) {
       throw new NotFoundException('Task not found');
     }
 
-    if (!this.hasDocumentAccess(user, task.list.document, 'view')) {
-      throw new ForbiddenException('Access denied to this document');
+    // Authorization check
+    if (!['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role) && task.list.document.departmentId !== user.departmentId) {
+      throw new ForbiddenException('You do not have access to these time entries');
     }
 
-    const { page, limit, sortBy = 'date', sortOrder = 'desc' } = paginationDto;
-    const skip = (page - 1) * limit;
-
-    const where = { taskId };
-
-    // Build orderBy
-    const orderBy: any = {};
-    if (sortBy === 'date' || sortBy === 'hoursSpent' || sortBy === 'createdAt') {
-      orderBy[sortBy] = sortOrder;
-    } else {
-      orderBy.date = 'desc';
-    }
-
-    const [timeEntries, total] = await Promise.all([
-      this.prisma.timeEntry.findMany({
-        where,
-        include: {
-          collaborator: true,
-          task: true,
+    const timeEntries = await this.prisma.timeEntry.findMany({
+      where: { taskId },
+      skip,
+      take: limit,
+      include: {
+        collaborator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          }
         },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      this.prisma.timeEntry.count({ where }),
-    ]);
+        task: {
+          include: {
+            list: {
+              include: {
+                document: {
+                  select: {
+                    id: true,
+                    title: true,
+                    reference: true
+                  }
+                }
+              }
+            }
+          }
+        },
+        invoice: true
+      },
+      orderBy: { date: 'desc' }
+    });
 
-    return new PaginatedResponse(timeEntries, total, paginationDto);
+    const total = await this.prisma.timeEntry.count({ where: { taskId } });
+
+    return {
+      data: timeEntries,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
   }
 
   async createTimeEntry(user: any, createTimeEntryDto: CreateTimeEntryDto) {
+    const { taskId, ...timeEntryData } = createTimeEntryDto;
+
+    // Verify task exists
     const task = await this.prisma.task.findUnique({
-      where: { id: createTimeEntryDto.taskId },
+      where: { id: taskId },
       include: {
         list: {
           include: {
-            document: true,
-          },
+            document: {
+              include: { creator: true, responsable: true, department: true }
+            }
+          }
         },
-        assignee: true,
-      },
+        assignee: true
+      }
     });
 
     if (!task) {
       throw new NotFoundException('Task not found');
     }
 
-    // Only task assignee, document responsable, or managers can add time entries
-    const canAddTime =
-      task.assigneeId === user.id ||
+    // Authorization: User can create time entry if they are:
+    // - Admin/Associate/Board
+    // - Document responsible
+    // - Task assignee
+    // - In the same department as the document
+    const canCreateTimeEntry =
+      ['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role) ||
       task.list.document.responsableId === user.id ||
-      user.role === 'BOARD' ||
-      user.role === 'ASSOCIATE';
+      task.assigneeId === user.id ||
+      task.list.document.departmentId === user.departmentId;
 
-    if (!canAddTime) {
-      throw new ForbiddenException('Insufficient permissions to add time entries to this task');
+    if (!canCreateTimeEntry) {
+      throw new ForbiddenException('You do not have permission to create time entries for this task');
     }
 
-    const timeEntry = await this.prisma.timeEntry.create({
+    return this.prisma.timeEntry.create({
       data: {
-        ...createTimeEntryDto,
-        collaboratorId: user.id,
-        date: createTimeEntryDto.date || new Date(),
+        ...timeEntryData,
+        taskId,
+        collaboratorId: user.id, // The user creating the time entry is the collaborator
       },
       include: {
-        task: true,
-        collaborator: true,
-      },
+        collaborator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          }
+        },
+        task: {
+          include: {
+            list: {
+              include: {
+                document: {
+                  select: {
+                    id: true,
+                    title: true,
+                    reference: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     });
-
-    return timeEntry;
   }
 
-  async getMyTasks(user: any, paginationDto: PaginationDto, status?: string) {
-    const { page, limit, sortBy = 'dueDate', sortOrder = 'asc' } = paginationDto;
+  // ========== USER-SPECIFIC ENDPOINTS ==========
+
+  async getMyTasks(user: any, paginationDto: any, status?: string) {
+    const { page = 1, limit = 10 } = paginationDto;
     const skip = (page - 1) * limit;
 
     const where: any = {
       OR: [
         { assigneeId: user.id },
-        { requestedAssignees: { has: user.id } },
-      ],
+        { requestedAssignees: { has: user.id } }
+      ]
     };
 
-    if (status) {
-      where.status = status;
-    }
+    if (status) where.status = status;
 
-    // Build orderBy - prioritize dueDate for tasks
-    const orderBy: any = {};
-    if (sortBy === 'dueDate') {
-      orderBy.dueDate = sortOrder;
-      orderBy.createdAt = 'desc'; // Secondary sort
-    } else if (sortBy === 'title' || sortBy === 'status' || sortBy === 'createdAt') {
-      orderBy[sortBy] = sortOrder;
-    } else {
-      orderBy.dueDate = 'asc';
-      orderBy.createdAt = 'desc';
-    }
-
-    const [tasks, total] = await Promise.all([
-      this.prisma.task.findMany({
-        where,
-        include: {
-          list: {
-            include: {
-              document: {
-                include: {
-                  client: true,
-                  department: true,
-                },
-              },
-            },
-          },
-          assignee: true,
-          timeEntries: {
-            where: { collaboratorId: user.id },
-          },
+    const tasks = await this.prisma.task.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          }
         },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      this.prisma.task.count({ where }),
-    ]);
+        timeEntries: {
+          where: { collaboratorId: user.id },
+          include: {
+            invoice: true
+          }
+        },
+        list: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    return new PaginatedResponse(tasks, total, paginationDto);
+    const total = await this.prisma.task.count({ where });
+
+    return {
+      data: tasks,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
   }
 
-  async getDepartmentTasks(user: any, paginationDto: PaginationDto, departmentId?: string) {
-    // Only Board, Associates, or Department managers can view department tasks
-    if (user.role !== 'BOARD' && user.role !== 'ASSOCIATE' && !user.managedDepartments?.length) {
-      throw new ForbiddenException('Insufficient permissions to view department tasks');
-    }
-
-    const { page, limit, sortBy = 'dueDate', sortOrder = 'asc' } = paginationDto;
+  async getDepartmentTasks(user: any, paginationDto: any, departmentId?: string) {
+    const { page = 1, limit = 10 } = paginationDto;
     const skip = (page - 1) * limit;
+
+    // Authorization: Only board, associates, or department managers can access
+    if (!['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role) && !user.managedDepartments?.length) {
+      throw new ForbiddenException('You do not have permission to view department tasks');
+    }
 
     const targetDepartmentId = departmentId || user.departmentId;
 
-    const where = {
+    const where: any = {
       list: {
         document: {
-          departmentId: targetDepartmentId,
-        },
-      },
+          departmentId: targetDepartmentId
+        }
+      }
     };
 
-    // Build orderBy
-    const orderBy: any = {};
-    if (sortBy === 'dueDate') {
-      orderBy.dueDate = sortOrder;
-      orderBy.createdAt = 'desc';
-    } else if (sortBy === 'title' || sortBy === 'status' || sortBy === 'createdAt') {
-      orderBy[sortBy] = sortOrder;
-    } else {
-      orderBy.dueDate = 'asc';
-      orderBy.createdAt = 'desc';
-    }
-
-    const [tasks, total] = await Promise.all([
-      this.prisma.task.findMany({
-        where,
-        include: {
-          list: {
-            include: {
-              document: {
-                include: {
-                  client: true,
-                  department: true,
-                  responsable: true,
-                },
-              },
-            },
-          },
-          assignee: true,
-          timeEntries: true,
+    const tasks = await this.prisma.task.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            department: true
+          }
         },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      this.prisma.task.count({ where }),
-    ]);
+        timeEntries: {
+          include: {
+            collaborator: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              }
+            }
+          }
+        },
+        list: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    return new PaginatedResponse(tasks, total, paginationDto);
+    const total = await this.prisma.task.count({ where });
+
+    return {
+      data: tasks,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
   }
 
-  private async createAuditLog(documentId: string, userId: string, action: string, message: string) {
-    return this.prisma.auditLog.create({
-      data: {
-        documentId,
-        action,
-        message,
-      },
-    });
+  // ========== HELPER METHODS ==========
+
+  private canModifyDocument(user: any, document: any): boolean {
+    if (['ADMIN', 'ASSOCIATE', 'BOARD'].includes(user.role)) {
+      return true;
+    }
+    if (document.creatorId === user.id || document.responsableId === user.id) {
+      return true;
+    }
+    if (document.departmentId === user.departmentId && ['SENIOR', 'MID'].includes(user.role)) {
+      return true;
+    }
+    return false;
   }
 }

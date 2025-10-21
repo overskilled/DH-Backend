@@ -96,50 +96,50 @@ export class DocumentsController {
     return this.documentsService.updateDocument(req.user, id, updateDocumentDto);
   }
 
-  @Delete(':id')
-  @ApiOperation({
-    summary: 'Delete Document',
-    description: 'Delete a document. Access: Board members and Associates only.'
-  })
-  async deleteDocument(@Request() req, @Param('id', ParseUUIDPipe) id: string) {
-    return this.documentsService.deleteDocument(req.user, id);
-  }
+  // @Delete(':id')
+  // @ApiOperation({
+  //   summary: 'Delete Document',
+  //   description: 'Delete a document. Access: Board members and Associates only.'
+  // })
+  // async deleteDocument(@Request() req, @Param('id', ParseUUIDPipe) id: string) {
+  //   return this.documentsService.deleteDocument(req.user, id);
+  // }
 
   // List Management Endpoints
-  @Get(':documentId/lists')
-  @ApiOperation({
-    summary: 'Get Document Lists',
-    description: 'Get all lists for a document with pagination.'
-  })
-  async getDocumentLists(
-    @Request() req,
-    @Param('documentId', ParseUUIDPipe) documentId: string,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    return this.documentsService.findListsByDocument(req.user, documentId, paginationDto);
-  }
+  // @Get(':documentId/lists')
+  // @ApiOperation({
+  //   summary: 'Get Document Lists',
+  //   description: 'Get all lists for a document with pagination.'
+  // })
+  // async getDocumentLists(
+  //   @Request() req,
+  //   @Param('documentId', ParseUUIDPipe) documentId: string,
+  //   @Query() paginationDto: PaginationDto,
+  // ) {
+  //   return this.documentsService.findListsByDocument(req.user, documentId, paginationDto);
+  // }
 
-  @Post('lists')
-  @ApiOperation({
-    summary: 'Create List',
-    description: 'Create a new list within a document. Access: Board, Associates, Document Creator, or Document Responsible.'
-  })
-  async createList(@Request() req, @Body() createListDto: CreateListDto) {
-    return this.documentsService.createList(req.user, createListDto);
-  }
+  // @Post('lists')
+  // @ApiOperation({
+  //   summary: 'Create List',
+  //   description: 'Create a new list within a document. Access: Board, Associates, Document Creator, or Document Responsible.'
+  // })
+  // async createList(@Request() req, @Body() createListDto: CreateListDto) {
+  //   return this.documentsService.createList(req.user, createListDto);
+  // }
 
-  @Put('lists/:listId/status')
-  @ApiOperation({
-    summary: 'Update List Status',
-    description: 'Update list status. Access: Board, Associates, Document Creator, or Document Responsible.'
-  })
-  async updateListStatus(
-    @Request() req,
-    @Param('listId', ParseUUIDPipe) listId: string,
-    @Body('status') status: string,
-  ) {
-    return this.documentsService.updateListStatus(req.user, listId, status);
-  }
+  // @Put('lists/:listId/status')
+  // @ApiOperation({
+  //   summary: 'Update List Status',
+  //   description: 'Update list status. Access: Board, Associates, Document Creator, or Document Responsible.'
+  // })
+  // async updateListStatus(
+  //   @Request() req,
+  //   @Param('listId', ParseUUIDPipe) listId: string,
+  //   @Body('status') status: string,
+  // ) {
+  //   return this.documentsService.updateListStatus(req.user, listId, status);
+  // }
 
   // Task Management Endpoints
   @Get('lists/:listId/tasks')

@@ -32,7 +32,11 @@ export class CreateDocumentDto {
     @ApiPropertyOptional()
     @IsOptional()
     budgetAmount?: any;
-
+    
+    @ApiPropertyOptional()
+    @IsOptional()
+    tags?: any;
+    
     @ApiPropertyOptional()
     @IsString()
     @IsOptional()
