@@ -637,4 +637,35 @@ export class UsersService {
         const safeUsers = users.map(({ password, ...rest }) => rest);
         return new PaginatedResponse(safeUsers, total, pagination);
     }
+async getAllSimpleUsers() {
+    const users = await this.prisma.user.findMany({
+      where: { 
+        isActive: true 
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        role: true,
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: [
+        { firstName: 'asc' },
+        { lastName: 'asc' },
+      ],
+    });
+
+    return { 
+      success: true,
+      data: users,
+      total: users.length 
+    };
+  }
+
 }

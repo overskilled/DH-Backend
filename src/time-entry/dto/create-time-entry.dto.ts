@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, Min } from 'class-validator';
 
 export class CreateTimeEntryDto {
   @ApiProperty()
@@ -8,6 +8,7 @@ export class CreateTimeEntryDto {
 
   @ApiProperty()
   @IsNumber()
+  @Min(0.1, { message: 'Le temps passé doit être supérieur à 0' })
   hoursSpent: number;
 
   @ApiPropertyOptional()
@@ -18,5 +19,6 @@ export class CreateTimeEntryDto {
   @ApiPropertyOptional()
   @IsDateString()
   @IsOptional()
-  date?: Date;
+  date?: string;
+
 }

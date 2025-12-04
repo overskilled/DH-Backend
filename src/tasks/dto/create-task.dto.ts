@@ -1,43 +1,45 @@
+
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsDateString, IsNumber, IsArray, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsNotEmpty, IsDateString } from 'class-validator';
 
 export class CreateTaskDto {
-    @ApiProperty()
-    @IsString()
-    title: string;
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  title: string;
 
-    @ApiPropertyOptional({ enum: ['ACTIVE', 'ARCHIVED', 'CLOSED'] })
-    @IsEnum(['ACTIVE', 'ARCHIVED', 'CLOSED'])
-    @IsOptional()
-    status?: string;
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @ApiPropertyOptional()
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  listId: string;
 
-    @ApiProperty()
-    @IsString()
-    listId: string;
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  assigneeId?: string;
 
-    @ApiPropertyOptional()
-    @IsString()
-    @IsOptional()
-    assigneeId?: string;
+  @ApiPropertyOptional()
+  @IsNumber()
+  @IsOptional()
+  maxTimeHours?: number;
 
-    @ApiPropertyOptional()
-    @IsArray()
-    @IsString({ each: true })
-    @IsOptional()
-    requestedAssignees?: string[];
-
-    @ApiPropertyOptional()
-    @IsNumber()
-    @IsOptional()
-    maxTimeHours?: number;
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  status?: string;
 
     @ApiPropertyOptional()
-    @IsDateString()
-    @IsOptional()
-    dueDate?: Date;
+  @IsDateString()
+  @IsOptional()
+  dueDate?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  createdById?: string;
 }

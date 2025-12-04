@@ -593,7 +593,8 @@ export class DocumentsService {
       data: {
         ...taskData,
         listId,
-        status: taskData.status as TaskStatus
+        status: taskData.status as TaskStatus,
+        createdById: user.id
       },
       include: {
         assignee: {

@@ -919,4 +919,18 @@ export class UsersController {
   async findByEmail(@Param('email') email: string) {
     return this.usersService.getUserByEmail(email);
   }
+
+ @Get('all/simple')
+  @UseGuards(AuthGuard)
+  @ApiOperation({
+    summary: 'Get all active users (simple format)',
+    description: 'Retrieve all active users in a simple format for dropdowns',
+  })
+  @ApiOkResponse({
+    description: 'Users retrieved successfully',
+  })
+  async findAllSimple() {
+    // Utiliser une méthode du service au lieu d'accéder directement à prisma
+    return this.usersService.getAllSimpleUsers();
+  }
 }

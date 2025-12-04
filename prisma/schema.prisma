@@ -8,25 +8,25 @@ datasource db {
 }
 
 model User {
-  id             String        @id @default(uuid())
+  id             String      @id @default(uuid())
   firstName      String
   lastName       String
-  email          String        @unique
+  email          String      @unique
   password       String
   phone          String?
   position       String?
   departmentId   String?
-  department     Department?   @relation(fields: [departmentId], references: [id])
-  role           Role          @default(JUNIOR)
-  pricingPerHour Decimal?      @db.Decimal(10, 2)
-  isActive       Boolean       @default(true)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  department     Department? @relation(fields: [departmentId], references: [id])
+  role           Role        @default(JUNIOR)
+  pricingPerHour Decimal?    @db.Decimal(10, 2)
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   // Core relations from your schema
-  createdDocuments    Document[]     @relation("DocumentCreator")
-  responsibleDocuments Document[]    @relation("DocumentResponsable")
-  issuedInvoices       Invoice[]     @relation("InvoiceIssuedBy")
+  createdDocuments     Document[]     @relation("DocumentCreator")
+  responsibleDocuments Document[]     @relation("DocumentResponsable")
+  issuedInvoices       Invoice[]      @relation("InvoiceIssuedBy")
   uploadedFiles        File[]
   generatedReports     Report[]
   notifications        Notification[]
@@ -34,7 +34,10 @@ model User {
   // Task management relations
   managedDepartments Department[] @relation("DepartmentManager")
   assignedTasks      Task[]       @relation("TaskAssignee")
-  timeEntries        TimeEntry[]
+  createdTasks       Task[]       @relation("TaskCreator")
+
+  timeEntries TimeEntry[]
+  tasks       Task[]
 
   @@map("users")
 }
@@ -70,79 +73,79 @@ model Client {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  documents   Document[]
-  invoices    Invoice[]
+  documents Document[]
+  invoices  Invoice[]
 
   @@map("clients")
 }
 
 model Referent {
-  id          String   @id @default(uuid())
-  name        String
-  email       String?
-  phone       String?
-  company     String?
-  position    String?
-  address     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  position  String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  documents   Document[]
+  documents Document[]
 
   @@map("referents")
 }
 
 model Document {
-  id              String     @id @default(uuid())
-  title           String
-  reference       String     @unique
-  type            String
-  description     String?
-  status          DocumentStatus @default(ACTIVE)
-  budgetAmount    Decimal?   @db.Decimal(14, 2)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id           String         @id @default(uuid())
+  title        String
+  reference    String         @unique
+  type         String
+  description  String?
+  status       DocumentStatus @default(ACTIVE)
+  budgetAmount Decimal?       @db.Decimal(14, 2)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
-  tags       String[] @default([])
-  spent      Decimal? @db.Decimal(14, 2)  // Actual spent amount
+  tags  String[] @default([])
+  spent Decimal? @db.Decimal(14, 2) // Actual spent amount
 
   // Core relations
-  referentId      String?
-  referent        Referent?  @relation(fields: [referentId], references: [id])
+  referentId String?
+  referent   Referent? @relation(fields: [referentId], references: [id])
 
-  responsableId   String?
-  responsable     User?      @relation("DocumentResponsable", fields: [responsableId], references: [id])
+  responsableId String?
+  responsable   User?   @relation("DocumentResponsable", fields: [responsableId], references: [id])
 
-  creatorId       String
-  creator         User       @relation("DocumentCreator", fields: [creatorId], references: [id])
+  creatorId String?
+  creator   User?   @relation("DocumentCreator", fields: [creatorId], references: [id])
 
-  clientId        String?
-  client          Client?    @relation(fields: [clientId], references: [id])
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
 
-  departmentId    String?
-  department      Department? @relation(fields: [departmentId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
 
   // Task management relations
-  lists           List[]
-  invoices        Invoice[]
-  reports         Report[]
-  files           File[]
-  auditLogs       AuditLog[]
+  lists     List[]
+  invoices  Invoice[]
+  reports   Report[]
+  files     File[]
+  auditLogs AuditLog[]
 
   @@map("documents")
 }
 
 model List {
-  id           String   @id @default(uuid())
-  name         String
-  description  String?
-  documentId   String
-  document     Document  @relation(fields: [documentId], references: [id])
-  status       ListStatus @default(OPEN)
-  tasks        Task[]
-  dueDate      DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  documentId  String
+  document    Document   @relation(fields: [documentId], references: [id])
+  status      ListStatus @default(OPEN)
+  tasks       Task[]
+  dueDate     DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   @@map("lists")
 }
@@ -156,12 +159,16 @@ model Task {
   assigneeId         String?
   assignee           User?       @relation("TaskAssignee", fields: [assigneeId], references: [id])
   requestedAssignees String[]    @default([])
+  createdById        String? // ✅ NOUVEAU CHAMP - créateur de la tâche
+  createdBy          User?       @relation("TaskCreator", fields: [createdById], references: [id]) // ✅ NOUVELLE RELATION
   maxTimeHours       Int?
   timeEntries        TimeEntry[]
   status             TaskStatus  @default(PENDING)
   dueDate            DateTime?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
+  user               User?       @relation(fields: [userId], references: [id])
+  userId             String?
 
   @@map("tasks")
 }
@@ -179,66 +186,74 @@ model TimeEntry {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  invoiceId      String?
-  invoice        Invoice? @relation(fields: [invoiceId], references: [id])
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
 
   @@map("time_entries")
 }
 
 model Invoice {
-  id             String     @id @default(uuid())
-  reference      String     @unique
-  amount         Decimal    @db.Decimal(14, 2)
-  taxRate        Decimal?   @db.Decimal(5, 2)
-  issueDate      DateTime   @default(now())
-  dueDate        DateTime?
-  paid           Boolean    @default(false)
-  paymentDate    DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id          String    @id @default(uuid())
+  reference   String    @unique
+  amount      Decimal   @db.Decimal(14, 2)
+  taxRate     Decimal?  @db.Decimal(5, 2)
+  issueDate   DateTime  @default(now())
+  dueDate     DateTime?
+  paid        Boolean   @default(false)
+  paymentDate DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   // Relations
-  documentId     String?
-  document       Document?  @relation(fields: [documentId], references: [id])
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id])
 
-  clientId       String?
-  client         Client?    @relation(fields: [clientId], references: [id])
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
 
-  issuedById     String?
-  issuedBy       User?      @relation("InvoiceIssuedBy", fields: [issuedById], references: [id])
+  issuedById String?
+  issuedBy   User?   @relation("InvoiceIssuedBy", fields: [issuedById], references: [id])
 
-  timeEntries    TimeEntry[]
+  timeEntries TimeEntry[]
+
+  // NOUVEAUX CHAMPS POUR LES EXPORTS
+  exportPdfPath   String?
+  exportExcelPath String?
+  notes           String?
+
+  // STATUT DE FACTURE PLUS DÉTAILLÉ
+  status InvoiceStatus @default(DRAFT)
 
   @@map("invoices")
 }
 
 model File {
-  id            String    @id @default(uuid())
-  name          String
-  path          String
-  mimeType      String
-  size          Int
-  uploadedById  String
-  uploadedBy    User      @relation(fields: [uploadedById], references: [id])
-  documentId    String?
-  document      Document? @relation(fields: [documentId], references: [id])
-  createdAt     DateTime  @default(now())
+  id           String    @id @default(uuid())
+  name         String
+  path         String
+  mimeType     String
+  size         Int
+  uploadedById String
+  uploadedBy   User      @relation(fields: [uploadedById], references: [id])
+  documentId   String?
+  document     Document? @relation(fields: [documentId], references: [id])
+  createdAt    DateTime  @default(now())
 
   @@map("files")
 }
 
 model Report {
-  id             String     @id @default(uuid())
-  title          String
-  content        String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id        String   @id @default(uuid())
+  title     String
+  content   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  documentId     String?
-  document       Document?  @relation(fields: [documentId], references: [id])
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id])
 
-  generatedById  String?
-  generatedBy    User?      @relation(fields: [generatedById], references: [id])
+  generatedById String?
+  generatedBy   User?   @relation(fields: [generatedById], references: [id])
 
   @@map("reports")
 }
@@ -291,5 +306,13 @@ enum TaskStatus {
   PENDING
   IN_PROGRESS
   DONE
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
   CANCELLED
 }

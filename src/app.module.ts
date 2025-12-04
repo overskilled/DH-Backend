@@ -10,6 +10,8 @@ import { TasksModule } from './tasks/tasks.module';
 import { ListsModule } from './lists/lists.module';
 import { DepartementsModule } from './departements/departements.module';
 import { ClientsModule } from './clients/clients.module';
+// import { InvoicesModule } from '.invoices/invoices.module';
+import { InvoicesModule } from './invoices/invoices.module';
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import { ClientsModule } from './clients/clients.module';
     TimeEntryModule,
     DepartementsModule,
     ClientsModule,
+    InvoicesModule,
+    // InvoicesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
