@@ -19,11 +19,14 @@ private mapStatus(status: string): TaskStatus {
       'in_progress': TaskStatus.IN_PROGRESS,
       'review': TaskStatus.IN_PROGRESS,
       'completed': TaskStatus.DONE,
+            'suspended': TaskStatus.SUSPENDED, // ✅ Utiliser CANCELLED pour suspended
+
       // Valeurs backend (au cas où)
       'PENDING': TaskStatus.PENDING,
       'IN_PROGRESS': TaskStatus.IN_PROGRESS,
       'DONE': TaskStatus.DONE,
       'CANCELLED': TaskStatus.CANCELLED,
+      'SUSPENDED': TaskStatus.SUSPENDED, 
     };
 
     const normalizedStatus = status.toLowerCase().trim();
@@ -313,4 +316,4 @@ async update(id: string, updateTaskDto: UpdateTaskDto) {
       where: { id },
     });
   }
-}
+} 
