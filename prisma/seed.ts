@@ -1,4 +1,4 @@
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient, Role, TaskStatus, AuditEntity, AuditAction } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -63,7 +63,7 @@ async function main() {
     // 2️⃣ Create Users with exact emails from your data
     // ======================
     console.log('👤 Creating users...');
-    const bcrypt = await import('bcrypt');
+    const bcrypt = require('bcrypt');
     const hashedPassword = await bcrypt.hash('admin123', 10);
     
     // Create Admin
@@ -534,9 +534,12 @@ async function main() {
     const ingrid = await prisma.user.findUnique({ where: { email: 'itchuem@dhavocats.com' } });
     const freedy = await prisma.user.findUnique({ where: { email: 'fnjomgang@dhavocats.com' } });
 
+    // Pour éviter l'erreur de contrainte unique, on va d'abord vérifier si les documents existent
     const documents = await Promise.all([
-      prisma.document.create({
-        data: {
+      prisma.document.upsert({
+        where: { reference: 'DOC-CONT-2024-001' },
+        update: {},
+        create: {
           title: 'Contentieux Commercial - ABC Corporation',
           reference: 'DOC-CONT-2024-001',
           type: 'Contentieux',
@@ -550,8 +553,10 @@ async function main() {
           creatorId: vanessa?.id!,
         },
       }),
-      prisma.document.create({
-        data: {
+      prisma.document.upsert({
+        where: { reference: 'DOC-CONS-2024-002' },
+        update: {},
+        create: {
           title: 'Conseil en Fusion-Acquisition - XYZ Enterprises',
           reference: 'DOC-CONS-2024-002',
           type: 'Conseil',
@@ -565,8 +570,10 @@ async function main() {
           creatorId: vanessa?.id!,
         },
       }),
-      prisma.document.create({
-        data: {
+      prisma.document.upsert({
+        where: { reference: 'DOC-FISC-2024-003' },
+        update: {},
+        create: {
           title: 'Optimisation Fiscale - Global Trading',
           reference: 'DOC-FISC-2024-003',
           type: 'Fiscal',
@@ -651,7 +658,7 @@ async function main() {
           assigneeId: glory?.id,
           createdById: vanessa?.id!,
           maxTimeHours: 8,
-          status: 'DONE',
+          status: TaskStatus.DONE,
           dueDate: new Date('2024-02-10'),
         },
       }),
@@ -663,7 +670,7 @@ async function main() {
           assigneeId: dylan?.id,
           createdById: vanessa?.id!,
           maxTimeHours: 12,
-          status: 'IN_PROGRESS',
+          status: TaskStatus.IN_PROGRESS,
           dueDate: new Date('2024-02-25'),
         },
       }),
@@ -677,7 +684,7 @@ async function main() {
           assigneeId: freedy?.id,
           createdById: vanessa?.id!,
           maxTimeHours: 20,
-          status: 'IN_PROGRESS',
+          status: TaskStatus.IN_PROGRESS,
           dueDate: new Date('2024-02-18'),
         },
       }),
@@ -691,7 +698,7 @@ async function main() {
           assigneeId: adamou?.id,
           createdById: vanessa?.id!,
           maxTimeHours: 10,
-          status: 'DONE',
+          status: TaskStatus.DONE,
           dueDate: new Date('2024-02-05'),
         },
       }),
@@ -841,21 +848,27 @@ async function main() {
     const auditLogs = await Promise.all([
       prisma.auditLog.create({
         data: {
-          documentId: documents[0].id,
-          action: 'CREATE',
-          message: 'Dossier créé et assigné au département Contentieux',
+          description: 'Dossier créé et assigné au département Contentieux',
+          entity: AuditEntity.DOCUMENT,
+          entityId: documents[0].id,
+          entityName: documents[0].title,
+          action: AuditAction.CREATE,
+          userId: vanessa?.id!,
         },
       }),
       prisma.auditLog.create({
         data: {
-          documentId: documents[0].id,
-          action: 'UPDATE',
-          message: 'Phase préliminaire complétée avec succès',
+          description: 'Phase préliminaire complétée avec succès',
+          entity: AuditEntity.DOCUMENT,
+          entityId: documents[0].id,
+          entityName: documents[0].title,
+          action: AuditAction.UPDATE,
+          userId: ingrid?.id!,
         },
       }),
     ]);
 
-    auditLogs.forEach(log => console.log(`   ✅ ${log.message}`));
+    auditLogs.forEach(log => console.log(`   ✅ ${log.description}`));
 
     // ======================
     // 1️⃣3️⃣ Create Notifications
