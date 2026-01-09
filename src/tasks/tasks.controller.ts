@@ -85,4 +85,23 @@ create(@Body() dto: CreateTaskDto, @Req() req: any) {
     );
   }
 
+  @Patch(':id/complete-review')
+async completeReview(
+  @Param('id') id: string,
+  @Body() body: { approved: boolean; feedback?: string },
+  @Req() req: any
+) {
+  return this.tasksService.completeReview(
+    id,
+    req.user.id,
+    body.approved,
+    body.feedback
+  );
+}
+
+@Get(':id/reviewers')
+async getReviewers(@Param('id') id: string) {
+  return this.tasksService.getTaskReviewers(id);
+}
+
 }
