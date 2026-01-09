@@ -1,9 +1,10 @@
 // tasks.service.ts - VERSION DÉFINITIVE
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { TaskStatus } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { TaskStatus, AuditAction, AuditEntity } from '@prisma/client';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { PrismaService } from 'prisma/prisma.service';
+import { TransferTaskDto } from './dto/transfer-task.dto';
 
 @Injectable()
 export class TasksService {
@@ -316,4 +317,161 @@ async update(id: string, updateTaskDto: UpdateTaskDto) {
       where: { id },
     });
   }
+
+ async transferTask(
+    taskId: string,
+    transferTaskDto: TransferTaskDto,
+    currentUserId: string
+  ) {
+    console.log('=== DÉBUT TRANSFERT DE TÂCHE ===');
+    console.log('Task ID:', taskId);
+    console.log('Transfer DTO:', transferTaskDto);
+    console.log('Current User ID:', currentUserId);
+
+    // 1. Récupérer la tâche
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        assignee: true,
+        createdBy: true,
+      },
+    });
+
+    if (!task) {
+      throw new BadRequestException('Tâche non trouvée');
+    }
+
+    console.log('Tâche trouvée:', task.title);
+    console.log('Assigné actuel:', task.assigneeId);
+    console.log('Créateur:', task.createdById);
+
+    // 2. Vérifier les permissions
+    // Seul l'assigné actuel, le créateur, ou un admin/board peut transférer
+    const canTransfer = 
+      task.assigneeId === currentUserId ||
+      task.createdById === currentUserId;
+
+    let userHasPermission = canTransfer;
+
+    if (!userHasPermission) {
+      const currentUser = await this.prisma.user.findUnique({
+        where: { id: currentUserId },
+        select: { role: true }
+      });
+
+      const isAdminOrBoard = currentUser?.role === 'ADMIN' || currentUser?.role === 'BOARD';
+      if (isAdminOrBoard) {
+        userHasPermission = true;
+      }
+    }
+
+    if (!userHasPermission) {
+      throw new ForbiddenException('Vous n\'avez pas la permission de transférer cette tâche');
+    }
+
+    // 3. Vérifier que le nouvel assigné existe
+    const newAssignee = await this.prisma.user.findUnique({
+      where: { id: transferTaskDto.newAssigneeId },
+    });
+
+    if (!newAssignee) {
+      throw new BadRequestException('Nouvel assigné non trouvé');
+    }
+
+    // 4. Vérifier que ce n'est pas le même assigné
+    if (task.assigneeId === transferTaskDto.newAssigneeId) {
+      throw new BadRequestException('La tâche est déjà assignée à cette personne');
+    }
+
+    // 5. Préparer les données de mise à jour
+    const updateData: any = {
+      assigneeId: transferTaskDto.newAssigneeId,
+    };
+
+    // Ajouter l'ancien assigné à la liste des assignés demandés
+    if (transferTaskDto.keepInRequestedAssignees !== false && task.assigneeId) {
+      const currentRequestedAssignees = task.requestedAssignees || [];
+      const updatedRequestedAssignees = [...new Set([...currentRequestedAssignees, task.assigneeId])];
+      updateData.requestedAssignees = updatedRequestedAssignees;
+    }
+
+    // 6. Effectuer le transfert
+    const updatedTask = await this.prisma.task.update({
+      where: { id: taskId },
+      data: updateData,
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    // 7. Créer un log d'audit
+    await this.prisma.auditLog.create({
+      data: {
+        action: AuditAction.ASSIGN,
+        entity: AuditEntity.TASK,
+        entityId: taskId,
+        entityName: task.title,
+        userId: currentUserId,
+        oldValues: {
+          assigneeId: task.assigneeId,
+          assignee: task.assignee ? `${task.assignee.firstName} ${task.assignee.lastName}` : null,
+        },
+        newValues: {
+          assigneeId: transferTaskDto.newAssigneeId,
+          assignee: `${newAssignee.firstName} ${newAssignee.lastName}`,
+          reason: transferTaskDto.reason,
+          comment: transferTaskDto.comment,
+        },
+        description: `Transfert de tâche: ${transferTaskDto.reason}${transferTaskDto.comment ? ` - ${transferTaskDto.comment}` : ''}`,
+      },
+    });
+
+    // 8. Créer une notification pour le nouvel assigné
+    await this.prisma.notification.create({
+      data: {
+        message: `Vous avez été assigné à la tâche "${task.title}" par ${task.assignee ? `${task.assignee.firstName} ${task.assignee.lastName}` : 'un collègue'}. Raison: ${this.getTransferReasonLabel(transferTaskDto.reason)}`,
+        userId: transferTaskDto.newAssigneeId,
+      },
+    });
+
+    console.log('=== TRANSFERT TERMINÉ AVEC SUCCÈS ===');
+    
+    return {
+      ...updatedTask,
+      transferDetails: {
+        reason: transferTaskDto.reason,
+        comment: transferTaskDto.comment,
+        previousAssignee: task.assignee,
+        transferredBy: currentUserId,
+        transferredAt: new Date(),
+      },
+    };
+  }
+
+  // Méthode utilitaire pour obtenir le libellé de la raison
+  private getTransferReasonLabel(reason: string): string {
+    const reasonLabels: Record<string, string> = {
+      REVIEW: 'Relecture',
+      TAKE_OVER: 'Prise de relais',
+      OVERLOAD: 'Surcharge',
+      OTHER: 'Autre raison',
+    };
+    
+    return reasonLabels[reason] || reason;
+  }
+
 } 

@@ -38,6 +38,18 @@ export class DocumentsController {
   async createDocument(@Request() req, @Body() createDocumentDto: CreateDocumentDto) {
     return this.documentsService.createDocument(req.user.id, createDocumentDto);
   }
+//   async createDocument(@Request() req, @Body() createDocumentDto: CreateDocumentDto) {
+//   const document = await this.documentsService.createDocument(req.user.id, createDocumentDto);
+  
+//   // Journalisation simple
+//   await this.auditLogHelper.logDocumentCreate(
+//     req.user.id,
+//     document.id,
+//     document.title
+//   );
+  
+//   return document;
+// }
 
   @Get()
   @ApiOperation({

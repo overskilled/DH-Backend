@@ -12,7 +12,7 @@ import { DepartementsModule } from './departements/departements.module';
 import { ClientsModule } from './clients/clients.module';
 // import { InvoicesModule } from '.invoices/invoices.module';
 import { InvoicesModule } from './invoices/invoices.module';
-// import { AuditLogModule } from './audit-log/audit-log.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -29,7 +29,7 @@ import { InvoicesModule } from './invoices/invoices.module';
     DepartementsModule,
     ClientsModule,
     InvoicesModule,
-    // AuditLogModule,
+    AuditLogModule,
     // InvoicesModule,
   ],
   controllers: [AppController],

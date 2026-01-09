@@ -5,11 +5,14 @@ import { GenerateInvoiceDto } from './dto/generate-invoice.dto';
 import { PrismaService } from 'prisma/prisma.service';
 import { PdfService } from 'src/pdf/pdf.service';
 import { Response } from 'express';
+import { AuditLogHelper } from '../audit-log/audit-log.helper';
+
 
 @Injectable()
 export class InvoicesService {
   constructor(
     private prisma: PrismaService, 
+    private auditLogHelper: AuditLogHelper,
     private pdfService: PdfService
   ) {}
 
@@ -154,6 +157,15 @@ export class InvoicesService {
         invoiced: true
       }
     });
+
+    // Après création de la facture
+    await this.auditLogHelper.logInvoiceGenerate(
+      userId,
+      invoice.id,
+      invoice.reference,
+      parseFloat(invoice.amount.toString()),
+      // request object si disponible
+    );
 
     return {
       invoice,

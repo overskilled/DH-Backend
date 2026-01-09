@@ -933,4 +933,23 @@ export class UsersController {
     // Utiliser une méthode du service au lieu d'accéder directement à prisma
     return this.usersService.getAllSimpleUsers();
   }
+
+  @Get('available-for-transfer/:taskId')
+@UseGuards(AuthGuard)
+@ApiOperation({
+  summary: 'Get available users for task transfer',
+  description: 'Retrieve all active users except the current task assignee',
+})
+@ApiParam({
+  name: 'taskId',
+  description: 'Task ID to check current assignee',
+  example: 'task-12345',
+  type: String,
+})
+@ApiOkResponse({
+  description: 'Available users retrieved successfully',
+})
+async getAvailableUsersForTransfer(@Param('taskId') taskId: string) {
+  return this.usersService.getAvailableUsersForTransfer(taskId);
+}
 }

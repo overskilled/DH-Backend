@@ -82,6 +82,10 @@ import { TimeEntryService } from './time-entry.service';
 import { CreateTimeEntryDto } from './dto/create-time-entry.dto';
 import { UpdateTimeEntryDto } from './dto/update-time-entry.dto';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
+import { AuditInterceptor } from '../audit-log/interceptors/audit.interceptor';
+import { Audit } from '../audit-log/decorators/audit.decorator';
+import { AuditAction, AuditEntity } from '../audit-log/entities/audit-log.entity';
+import { UseInterceptors } from '@nestjs/common';
 
 
 @Controller('time-entries')
@@ -90,6 +94,8 @@ export class TimeEntryController {
   constructor(private readonly timeEntryService: TimeEntryService) {}
 
   @Post()
+  @UseInterceptors(AuditInterceptor)
+  @Audit(AuditAction.TIME_ENTRY_ADD, AuditEntity.TIME_ENTRY)
   create(@Body() createTimeEntryDto: CreateTimeEntryDto, @Req() req: any) {
     console.log('TimeEntry Controller - Creating time entry for user:', req.user);
     

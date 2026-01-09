@@ -3,6 +3,7 @@ import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
+import { TransferTaskDto } from './dto/transfer-task.dto';
 
 @Controller('tasks')
 @UseGuards(AuthGuard)
@@ -71,6 +72,17 @@ create(@Body() dto: CreateTaskDto, @Req() req: any) {
     return this.tasksService.update(id, { assigneeId: body.assigneeId });
   }
 
-  
+  @Patch(':id/transfer')
+  async transferTask(
+    @Param('id') id: string,
+    @Body() transferTaskDto: TransferTaskDto,
+    @Req() req: any
+  ) {
+    return this.tasksService.transferTask(
+      id,
+      transferTaskDto,
+      req.user.id
+    );
+  }
 
 }

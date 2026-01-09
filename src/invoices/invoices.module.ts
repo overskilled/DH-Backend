@@ -6,9 +6,10 @@ import { TasksModule } from '../tasks/tasks.module';
 import { TimeEntryModule } from '../time-entry/time-entry.module';
 import { PrismaModule } from 'prisma/prisma.module';
 import { PdfModule } from 'src/pdf/pdf.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
-  imports: [PrismaModule, TasksModule, TimeEntryModule ,PdfModule],
+  imports: [PrismaModule, TasksModule, TimeEntryModule ,PdfModule ,AuditLogModule],
   controllers: [InvoicesController],
   providers: [InvoicesService],
   exports: [InvoicesService],

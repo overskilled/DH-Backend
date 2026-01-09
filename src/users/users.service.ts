@@ -668,4 +668,48 @@ async getAllSimpleUsers() {
     };
   }
 
+  // Dans src/users/users.service.ts, ajoutez cette méthode:
+async getAvailableUsersForTransfer(taskId: string) {
+  // Récupérer la tâche pour connaître l'assigné actuel
+  const task = await this.prisma.task.findUnique({
+    where: { id: taskId },
+    select: { assigneeId: true }
+  });
+
+  // Construire la condition where
+  const where: Prisma.UserWhereInput = { isActive: true };
+  
+  // Exclure l'assigné actuel s'il existe
+  if (task?.assigneeId) {
+    where.id = { not: task.assigneeId };
+  }
+
+  const users = await this.prisma.user.findMany({
+    where,
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      role: true,
+      department: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    orderBy: [
+      { firstName: 'asc' },
+      { lastName: 'asc' },
+    ],
+  });
+
+  return { 
+    success: true,
+    data: users,
+    total: users.length 
+  };
+}
+
 }

@@ -307,10 +307,13 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { CreateTimeEntryDto } from './dto/create-time-entry.dto';
 import { UpdateTimeEntryDto } from './dto/update-time-entry.dto';
+import { AuditLogHelper } from '../audit-log/audit-log.helper';
+
 
 @Injectable()
 export class TimeEntryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private auditLogHelper: AuditLogHelper,
+    private prisma: PrismaService) {}
 
   async create(createTimeEntryDto: CreateTimeEntryDto, userId: string) {
     console.log('Creating time entry with data:', createTimeEntryDto);
@@ -359,6 +362,15 @@ export class TimeEntryService {
           },
         },
       });
+
+      // Après création
+    await this.auditLogHelper.logTimeEntryAdd(
+      userId,
+      timeEntry.id,
+      task.title || 'Task',
+      parseFloat(createTimeEntryDto.hoursSpent.toString()),
+      // request object si disponible
+    );
 
       console.log('✅ Time entry created successfully:', timeEntry);
       return timeEntry;

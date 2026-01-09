@@ -19,7 +19,12 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { GenerateInvoiceDto } from './dto/generate-invoice.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
+import { Audit } from '../audit-log/decorators/audit.decorator';
+import { AuditInterceptor } from '../audit-log/interceptors/audit.interceptor';
+import { AuditAction, AuditEntity } from '../audit-log/entities/audit-log.entity';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
+import { UseInterceptors } from '@nestjs/common';
+
 
 @ApiTags('invoices')
 @Controller('invoices')
@@ -45,6 +50,8 @@ export class InvoicesController {
 
   
 @Post('generate')
+  @UseInterceptors(AuditInterceptor)
+  @Audit(AuditAction.INVOICE_GENERATE, AuditEntity.INVOICE)
 @ApiOperation({ summary: 'Générer automatiquement une facture à partir des entrées de temps' })
 @ApiResponse({ status: HttpStatus.CREATED, description: 'Facture générée avec succès' })
 @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Document non trouvé' })
