@@ -237,26 +237,98 @@ async findOne(id: string) {
     });
   }
 
+  // async getTasksByList(listId: string, filters: any) {
+  //   const where: any = { listId };
+
+  //   if (filters.assigneeId) where.assigneeId = filters.assigneeId;
+  //   if (filters.status) where.status = this.mapStatus(filters.status);
+
+  //   return this.prisma.task.findMany({
+  //     where,
+  //     include: {
+  //       assignee: {
+  //         select: {
+  //           id: true,
+  //           firstName: true,
+  //           lastName: true,
+  //         },
+  //       },
+  //     },
+  //     orderBy: { createdAt: 'desc' },
+  //   });
+  // }
+
   async getTasksByList(listId: string, filters: any) {
-    const where: any = { listId };
+  const where: any = { listId };
 
-    if (filters.assigneeId) where.assigneeId = filters.assigneeId;
-    if (filters.status) where.status = this.mapStatus(filters.status);
+  // Si un ID d'utilisateur est fourni pour filtrer
+  if (filters) {
+    // Si c'est un filtre simple (assigneeId)
+    if (filters.assigneeId) {
+      where.assigneeId = filters.assigneeId;
+    }
+    
+    // Si c'est un filtre OR (pour les relecteurs)
+    if (filters.OR) {
+      where.OR = filters.OR.map(condition => {
+        if (condition.assigneeId) {
+          return { assigneeId: condition.assigneeId };
+        }
+        if (condition.requestedAssignees && condition.requestedAssignees.has) {
+          return { 
+            requestedAssignees: { 
+              has: condition.requestedAssignees.has 
+            } 
+          };
+        }
+        return condition;
+      });
+    }
+    
+    // Support direct pour requestedAssignees
+    if (filters.requestedAssignees) {
+      where.requestedAssignees = {
+        has: filters.requestedAssignees
+      };
+    }
 
-    return this.prisma.task.findMany({
-      where,
-      include: {
-        assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
+    // Gestion du filtre combiné
+    if (filters.userId) {
+      where.OR = [
+        { assigneeId: filters.userId },
+        { requestedAssignees: { has: filters.userId } }
+      ];
+    }
+  }
+
+  if (filters?.status) {
+    where.status = this.mapStatus(filters.status);
+  }
+
+  return this.prisma.task.findMany({
+    where,
+    include: {
+      assignee: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
         },
       },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
+      createdBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+
+  
 
   // async findOne(id: string) {
   //   return this.prisma.task.findUnique({
