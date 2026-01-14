@@ -1,17 +1,22 @@
-// tasks.service.ts - VERSION DÉFINITIVE
+// tasks.service.ts - VERSION CORRIGÉE AVEC TYPESCRIPT
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { TaskStatus, AuditAction, AuditEntity } from '@prisma/client';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
-import { PrismaService } from 'prisma/prisma.service';
 import { TransferTaskDto, TransferType } from './dto/transfer-task.dto';
+import { AuditLogHelper } from '../audit-log/audit-log.helper';
+import { Decimal } from '@prisma/client/runtime/library'; // AJOUT POUR LE TYPE DECIMAL
+import { PrismaService } from 'prisma/prisma.service';
 
 @Injectable()
 export class TasksService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLogHelper: AuditLogHelper
+  ) {}
 
   // Mapping simplifié et efficace
-private mapStatus(status: string): TaskStatus {
+  private mapStatus(status: string): TaskStatus {
     console.log('Mapping status:', status);
     
     const statusMap: Record<string, TaskStatus> = {
@@ -20,7 +25,7 @@ private mapStatus(status: string): TaskStatus {
       'in_progress': TaskStatus.IN_PROGRESS,
       'review': TaskStatus.IN_PROGRESS,
       'completed': TaskStatus.DONE,
-            'suspended': TaskStatus.SUSPENDED, // ✅ Utiliser CANCELLED pour suspended
+      'suspended': TaskStatus.SUSPENDED,
 
       // Valeurs backend (au cas où)
       'PENDING': TaskStatus.PENDING,
@@ -39,23 +44,42 @@ private mapStatus(status: string): TaskStatus {
     
     return mappedStatus;
   }
+
+  async create(createTaskDto: CreateTaskDto & { createdById: string }) {
+    console.log('Création tâche avec données:', createTaskDto);
     
-  
-async create(createTaskDto: CreateTaskDto & { createdById: string }) {
-  console.log('Création tâche avec données:', createTaskDto);
-  
-  try {
-    // Vérifier que la liste existe
-    const list = await this.prisma.list.findUnique({
-      where: { id: createTaskDto.listId }
-    });
+    try {
+      // Vérifier que la liste existe
+      const list = await this.prisma.list.findUnique({
+        where: { id: createTaskDto.listId },
+        include: {
+          document: {
+            select: {
+              id: true,
+              title: true,
+              reference: true
+            }
+          }
+        }
+      });
 
-    if (!list) {
-      throw new BadRequestException('Liste non trouvée');
-    }
+      if (!list) {
+        throw new BadRequestException('Liste non trouvée');
+      }
 
-    // Vérifier que l'assignee existe si fourni
-    if (createTaskDto.assigneeId) {
+      // Vérifier que l'assignee existe si fourni
+      let assigneeUser = null;
+      // if (createTaskDto.assigneeId) {
+      //   assigneeUser = await this.prisma.user.findUnique({
+      //     where: { id: createTaskDto.assigneeId }
+      //   });
+
+      //   if (!assigneeUser) {
+      //     throw new BadRequestException('Utilisateur assigné non trouvé');
+      //   }
+      // }
+
+          if (createTaskDto.assigneeId) {
       const user = await this.prisma.user.findUnique({
         where: { id: createTaskDto.assigneeId }
       });
@@ -65,29 +89,94 @@ async create(createTaskDto: CreateTaskDto & { createdById: string }) {
       }
     }
 
-    const taskData: any = {
-      title: createTaskDto.title,
-      description: createTaskDto.description,
-      listId: createTaskDto.listId,
-      status: this.mapStatus(createTaskDto.status || 'todo'),
-      createdById: createTaskDto.createdById, // ✅ Ajout du créateur
-    };
 
-    // Ajouter les champs optionnels
-    if (createTaskDto.assigneeId) {
-      taskData.assigneeId = createTaskDto.assigneeId;
-    }
-    if (createTaskDto.maxTimeHours !== undefined && createTaskDto.maxTimeHours !== null) {
-      taskData.maxTimeHours = createTaskDto.maxTimeHours;
-    }
-    if (createTaskDto.dueDate) {
-      taskData.dueDate = new Date(createTaskDto.dueDate);
-    }
+      const taskData: any = {
+        title: createTaskDto.title,
+        description: createTaskDto.description,
+        listId: createTaskDto.listId,
+        status: this.mapStatus(createTaskDto.status || 'todo'),
+        createdById: createTaskDto.createdById,
+      };
 
-    console.log('Données finales pour création:', taskData);
+      // Ajouter les champs optionnels
+      if (createTaskDto.assigneeId) {
+        taskData.assigneeId = createTaskDto.assigneeId;
+      }
+      if (createTaskDto.maxTimeHours !== undefined && createTaskDto.maxTimeHours !== null) {
+        taskData.maxTimeHours = createTaskDto.maxTimeHours;
+      }
+      if (createTaskDto.dueDate) {
+        taskData.dueDate = new Date(createTaskDto.dueDate);
+      }
 
-    const task = await this.prisma.task.create({
-      data: taskData,
+      console.log('Données finales pour création:', taskData);
+
+      const task = await this.prisma.task.create({
+        data: taskData,
+        include: {
+          assignee: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          createdBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          list: {
+            select: {
+              name: true,
+              document: {
+                select: {
+                  id: true,
+                  title: true
+                }
+              }
+            }
+          }
+        },
+      });
+
+      // LOG D'AUDIT : Création de tâche
+      await this.auditLogHelper.log(
+        AuditAction.CREATE as any, // CORRECTION : Utiliser 'as any' pour bypass l'erreur TypeScript
+        AuditEntity.TASK as any,
+        task.id,
+        task.title,
+        createTaskDto.createdById,
+        {
+          description: `Création de la tâche "${task.title}"`,
+          newValues: {
+            title: task.title,
+            description: task.description,
+            status: task.status,
+            listId: task.listId,
+            assigneeId: task.assigneeId,
+            maxTimeHours: task.maxTimeHours,
+            dueDate: task.dueDate,
+            documentId: list.document?.id,
+            documentTitle: list.document?.title
+          }
+        }
+      );
+      
+      console.log('✅ Tâche créée avec succès:', task);
+      return task;
+    } catch (error) {
+      console.error('❌ Erreur création tâche:', error);
+      throw error;
+    }
+  }
+
+  async findOne(id: string) {
+    return this.prisma.task.findUnique({
+      where: { id },
       include: {
         assignee: {
           select: {
@@ -97,123 +186,27 @@ async create(createTaskDto: CreateTaskDto & { createdById: string }) {
             email: true,
           },
         },
-        createdBy: { // ✅ Inclure les infos du créateur
+        createdBy: {
           select: {
             id: true,
             firstName: true,
             lastName: true,
           },
         },
-      },
-    });
-    
-    console.log('✅ Tâche créée avec succès:', task);
-    return task;
-  } catch (error) {
-    console.error('❌ Erreur création tâche:', error);
-    throw error;
-  }
-}
-
-async findOne(id: string) {
-  return this.prisma.task.findUnique({
-    where: { id },
-    include: {
-      assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-        },
-      },
-      createdBy: { // ✅ Inclure les infos du créateur
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      timeEntries: {
-        include: {
-          collaborator: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
+        timeEntries: {
+          include: {
+            collaborator: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
             },
           },
         },
       },
-    },
-  });
-}
-//  async create(createTaskDto: CreateTaskDto) {
-//     console.log('Création tâche avec données:', createTaskDto);
-    
-//     try {
-//       // Vérifier que la liste existe
-//       const list = await this.prisma.list.findUnique({
-//         where: { id: createTaskDto.listId }
-//       });
-
-//       if (!list) {
-//         throw new BadRequestException('Liste non trouvée');
-//       }
-
-//       // Vérifier que l'assignee existe si fourni
-//       if (createTaskDto.assigneeId) {
-//         const user = await this.prisma.user.findUnique({
-//           where: { id: createTaskDto.assigneeId }
-//         });
-
-//         if (!user) {
-//           throw new BadRequestException('Utilisateur assigné non trouvé');
-//         }
-//       }
-
-//       const taskData: any = {
-//         title: createTaskDto.title,
-//         description: createTaskDto.description,
-//         listId: createTaskDto.listId,
-//         status: this.mapStatus(createTaskDto.status || 'todo'),
-//       };
-
-//       // Ajouter les champs optionnels
-//       if (createTaskDto.assigneeId) {
-//         taskData.assigneeId = createTaskDto.assigneeId;
-//       }
-//       if (createTaskDto.maxTimeHours !== undefined && createTaskDto.maxTimeHours !== null) {
-//         taskData.maxTimeHours = createTaskDto.maxTimeHours;
-//       }
-//       if (createTaskDto.dueDate) {
-//         taskData.dueDate = new Date(createTaskDto.dueDate);
-//       }
-
-//       console.log('Données finales pour création:', taskData);
-
-//       const task = await this.prisma.task.create({
-//         data: taskData,
-//         include: {
-//           assignee: {
-//             select: {
-//               id: true,
-//               firstName: true,
-//               lastName: true,
-//               email: true,
-//             },
-//           },
-//         },
-//       });
-      
-//       console.log('✅ Tâche créée avec succès:', task);
-//       return task;
-//     } catch (error) {
-//       console.error('❌ Erreur création tâche:', error);
-//       throw error;
-//     }
-//   }
-
+    });
+  }
 
   async findAll(filters: { status?: string; assigneeId?: string; listId?: string }) {
     const where: any = {};
@@ -237,139 +230,160 @@ async findOne(id: string) {
     });
   }
 
-  // async getTasksByList(listId: string, filters: any) {
-  //   const where: any = { listId };
-
-  //   if (filters.assigneeId) where.assigneeId = filters.assigneeId;
-  //   if (filters.status) where.status = this.mapStatus(filters.status);
-
-  //   return this.prisma.task.findMany({
-  //     where,
-  //     include: {
-  //       assignee: {
-  //         select: {
-  //           id: true,
-  //           firstName: true,
-  //           lastName: true,
-  //         },
-  //       },
-  //     },
-  //     orderBy: { createdAt: 'desc' },
-  //   });
-  // }
-
   async getTasksByList(listId: string, filters: any) {
-  const where: any = { listId };
+    const where: any = { listId };
 
-  // Si un ID d'utilisateur est fourni pour filtrer
-  if (filters) {
-    // Si c'est un filtre simple (assigneeId)
-    if (filters.assigneeId) {
-      where.assigneeId = filters.assigneeId;
+    if (filters) {
+      if (filters.assigneeId) {
+        where.assigneeId = filters.assigneeId;
+      }
+      
+      if (filters.OR) {
+        where.OR = filters.OR.map((condition: any) => {
+          if (condition.assigneeId) {
+            return { assigneeId: condition.assigneeId };
+          }
+          if (condition.requestedAssignees && condition.requestedAssignees.has) {
+            return { 
+              requestedAssignees: { 
+                has: condition.requestedAssignees.has 
+              } 
+            };
+          }
+          return condition;
+        });
+      }
+      
+      if (filters.requestedAssignees) {
+        where.requestedAssignees = {
+          has: filters.requestedAssignees
+        };
+      }
+
+      if (filters.userId) {
+        where.OR = [
+          { assigneeId: filters.userId },
+          { requestedAssignees: { has: filters.userId } }
+        ];
+      }
+    }
+
+    if (filters?.status) {
+      where.status = this.mapStatus(filters.status);
+    }
+
+    return this.prisma.task.findMany({
+      where,
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async update(id: string, updateTaskDto: UpdateTaskDto, userId: string) {
+    // Récupérer la tâche avant modification pour comparer
+    const oldTask = await this.prisma.task.findUnique({
+      where: { id },
+      include: {
+        list: {
+          include: {
+            document: true
+          }
+        },
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true
+          }
+        }
+      }
+    });
+
+    if (!oldTask) {
+      throw new NotFoundException('Tâche non trouvée');
+    }
+
+    const updateData: any = {};
+    const changes: any = {};
+
+    if (updateTaskDto.title !== undefined && updateTaskDto.title !== oldTask.title) {
+      updateData.title = updateTaskDto.title;
+      changes.title = { old: oldTask.title, new: updateTaskDto.title };
     }
     
-    // Si c'est un filtre OR (pour les relecteurs)
-    if (filters.OR) {
-      where.OR = filters.OR.map(condition => {
-        if (condition.assigneeId) {
-          return { assigneeId: condition.assigneeId };
-        }
-        if (condition.requestedAssignees && condition.requestedAssignees.has) {
-          return { 
-            requestedAssignees: { 
-              has: condition.requestedAssignees.has 
-            } 
-          };
-        }
-        return condition;
-      });
+    if (updateTaskDto.description !== undefined && updateTaskDto.description !== oldTask.description) {
+      updateData.description = updateTaskDto.description;
+      changes.description = { old: oldTask.description, new: updateTaskDto.description };
     }
     
-    // Support direct pour requestedAssignees
-    if (filters.requestedAssignees) {
-      where.requestedAssignees = {
-        has: filters.requestedAssignees
+    if (updateTaskDto.status !== undefined) {
+      const newStatus = this.mapStatus(updateTaskDto.status);
+      if (oldTask.status !== newStatus) {
+        updateData.status = newStatus;
+        changes.status = { old: oldTask.status, new: newStatus };
+        
+        // LOG D'AUDIT SPÉCIFIQUE : Changement de statut
+        await this.auditLogHelper.logTaskStatusChange(
+          userId,
+          id,
+          oldTask.title,
+          oldTask.status,
+          newStatus
+        );
+      }
+    }
+    
+    if (updateTaskDto.assigneeId !== undefined && updateTaskDto.assigneeId !== oldTask.assigneeId) {
+      const newAssignee = updateTaskDto.assigneeId ? await this.prisma.user.findUnique({
+        where: { id: updateTaskDto.assigneeId },
+        select: { firstName: true, lastName: true }
+      }) : null;
+      
+      updateData.assigneeId = updateTaskDto.assigneeId;
+      changes.assignee = {
+        old: oldTask.assignee ? `${oldTask.assignee.firstName} ${oldTask.assignee.lastName}` : null,
+        new: newAssignee ? `${newAssignee.firstName} ${newAssignee.lastName}` : null,
+        oldId: oldTask.assigneeId,
+        newId: updateTaskDto.assigneeId
       };
     }
-
-    // Gestion du filtre combiné
-    if (filters.userId) {
-      where.OR = [
-        { assigneeId: filters.userId },
-        { requestedAssignees: { has: filters.userId } }
-      ];
+    
+    if (updateTaskDto.maxTimeHours !== undefined && updateTaskDto.maxTimeHours !== oldTask.maxTimeHours) {
+      updateData.maxTimeHours = updateTaskDto.maxTimeHours;
+      changes.maxTimeHours = { old: oldTask.maxTimeHours, new: updateTaskDto.maxTimeHours };
     }
-  }
-
-  if (filters?.status) {
-    where.status = this.mapStatus(filters.status);
-  }
-
-  return this.prisma.task.findMany({
-    where,
-    include: {
-      assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      createdBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-}
-
-
-  
-
-  // async findOne(id: string) {
-  //   return this.prisma.task.findUnique({
-  //     where: { id },
-  //     include: {
-  //       assignee: {
-  //         select: {
-  //           id: true,
-  //           firstName: true,
-  //           lastName: true,
-  //           email: true,
-  //         },
-  //       },
-  //       timeEntries: {
-  //         include: {
-  //           collaborator: {
-  //             select: {
-  //               id: true,
-  //               firstName: true,
-  //               lastName: true,
-  //             },
-  //           },
-  //         },
-  //       },
-  //     },
-  //   });
-  // }
-
-async update(id: string, updateTaskDto: UpdateTaskDto) {
-    const updateData: any = {};
-
-    if (updateTaskDto.title !== undefined) updateData.title = updateTaskDto.title;
-    if (updateTaskDto.description !== undefined) updateData.description = updateTaskDto.description;
-    if (updateTaskDto.status !== undefined) updateData.status = this.mapStatus(updateTaskDto.status);
-    if (updateTaskDto.assigneeId !== undefined) updateData.assigneeId = updateTaskDto.assigneeId;
-    if (updateTaskDto.maxTimeHours !== undefined) updateData.maxTimeHours = updateTaskDto.maxTimeHours;
+    
     if (updateTaskDto.dueDate !== undefined) {
-      updateData.dueDate = updateTaskDto.dueDate ? new Date(updateTaskDto.dueDate) : null;
+      const oldDueDate = oldTask.dueDate ? oldTask.dueDate.toISOString().split('T')[0] : null;
+      const newDueDate = updateTaskDto.dueDate ? new Date(updateTaskDto.dueDate).toISOString().split('T')[0] : null;
+      
+      if (oldDueDate !== newDueDate) {
+        updateData.dueDate = updateTaskDto.dueDate ? new Date(updateTaskDto.dueDate) : null;
+        changes.dueDate = { old: oldTask.dueDate, new: updateData.dueDate };
+      }
     }
 
-    return this.prisma.task.update({
+    // Si aucune modification, retourner la tâche telle quelle
+    if (Object.keys(updateData).length === 0) {
+      return oldTask;
+    }
+
+    const updatedTask = await this.prisma.task.update({
       where: { id },
       data: updateData,
       include: {
@@ -380,17 +394,153 @@ async update(id: string, updateTaskDto: UpdateTaskDto) {
             lastName: true,
           },
         },
+        list: {
+          include: {
+            document: true
+          }
+        }
       },
     });
+
+    // LOG D'AUDIT GÉNÉRAL : Mise à jour de tâche (si ce n'est pas juste un changement de statut déjà logué)
+    if (changes.status === undefined || Object.keys(changes).length > 1) {
+      const changeDescriptions: string[] = []; // TYPAGE EXPLICITE
+      if (changes.title) changeDescriptions.push('titre');
+      if (changes.description) changeDescriptions.push('description');
+      if (changes.assignee) changeDescriptions.push('assignation');
+      if (changes.maxTimeHours) changeDescriptions.push('temps maximum');
+      if (changes.dueDate) changeDescriptions.push('date d\'échéance');
+
+      if (changeDescriptions.length > 0) {
+        await this.auditLogHelper.log(
+          AuditAction.UPDATE as any,
+          AuditEntity.TASK as any,
+          id,
+          oldTask.title,
+          userId,
+          {
+            description: `Modification de la tâche "${oldTask.title}" : ${changeDescriptions.join(', ')}`,
+            oldValues: oldTask,
+            newValues: updatedTask
+          }
+        );
+      }
+    }
+
+    return updatedTask;
   }
 
-  async remove(id: string) {
+  async assignTask(id: string, assigneeId: string, userId: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id },
+      include: {
+        assignee: {
+          select: {
+            firstName: true,
+            lastName: true
+          }
+        }
+      }
+    });
+
+    if (!task) {
+      throw new NotFoundException('Tâche non trouvée');
+    }
+
+    const newAssignee = await this.prisma.user.findUnique({
+      where: { id: assigneeId },
+      select: { firstName: true, lastName: true }
+    });
+
+    if (!newAssignee) {
+      throw new BadRequestException('Utilisateur assigné non trouvé');
+    }
+
+    const updatedTask = await this.prisma.task.update({
+      where: { id },
+      data: { assigneeId },
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    // LOG D'AUDIT : Assignation de tâche
+    await this.auditLogHelper.log(
+      AuditAction.ASSIGN as any,
+      AuditEntity.TASK as any,
+      id,
+      task.title,
+      userId,
+      {
+        oldValues: {
+          assigneeId: task.assigneeId,
+          assignee: task.assignee ? `${task.assignee.firstName} ${task.assignee.lastName}` : null
+        },
+        newValues: {
+          assigneeId: assigneeId,
+          assignee: `${newAssignee.firstName} ${newAssignee.lastName}`
+        },
+        description: `Assignation de la tâche "${task.title}" à ${newAssignee.firstName} ${newAssignee.lastName}`
+      }
+    );
+
+    return updatedTask;
+  }
+
+  async remove(id: string, userId: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id },
+      include: {
+        list: {
+          include: {
+            document: true
+          }
+        },
+        assignee: {
+          select: {
+            firstName: true,
+            lastName: true
+          }
+        }
+      }
+    });
+
+    if (!task) {
+      throw new NotFoundException('Tâche non trouvée');
+    }
+
+    // LOG D'AUDIT : Suppression de tâche
+    await this.auditLogHelper.log(
+      AuditAction.DELETE as any,
+      AuditEntity.TASK as any,
+      id,
+      task.title,
+      userId,
+      {
+        description: `Suppression de la tâche "${task.title}"`,
+        oldValues: {
+          title: task.title,
+          status: task.status,
+          assignee: task.assignee ? `${task.assignee.firstName} ${task.assignee.lastName}` : null,
+          listId: task.listId,
+          documentId: task.list.document?.id,
+          documentTitle: task.list.document?.title
+        }
+      }
+    );
+
     return this.prisma.task.delete({
       where: { id },
     });
   }
 
-async transferTask(
+  async transferTask(
     taskId: string,
     transferTaskDto: TransferTaskDto,
     currentUserId: string
@@ -423,7 +573,6 @@ async transferTask(
     console.log('Créateur:', task.createdById);
 
     // 2. Vérifier les permissions
-    // Seul l'assigné actuel, le créateur, ou un admin/board peut demander une relecture
     const canRequestReview = 
       task.assigneeId === currentUserId ||
       task.createdById === currentUserId;
@@ -514,14 +663,14 @@ async transferTask(
       },
     });
 
-    // 7. Créer un log d'audit
-    await this.prisma.auditLog.create({
-      data: {
-        action: AuditAction.ASSIGN,
-        entity: AuditEntity.TASK,
-        entityId: taskId,
-        entityName: task.title,
-        userId: currentUserId,
+    // 7. Créer un log d'audit (utiliser AuditLogHelper au lieu de prisma directement)
+    await this.auditLogHelper.log(
+      AuditAction.ASSIGN as any,
+      AuditEntity.TASK as any,
+      taskId,
+      task.title,
+      currentUserId,
+      {
         oldValues: {
           assigneeId: task.assigneeId,
           assignee: task.assignee ? `${task.assignee.firstName} ${task.assignee.lastName}` : null,
@@ -537,7 +686,7 @@ async transferTask(
         },
         description: `Transfert de type: ${transferTaskDto.type} - ${transferTaskDto.comment || 'Aucun commentaire'}`,
       },
-    });
+    );
 
     // 8. Créer une notification pour la nouvelle personne
     let notificationMessage = '';
@@ -618,6 +767,24 @@ async transferTask(
       },
     });
 
+    // LOG D'AUDIT : Complétion de relecture
+    await this.auditLogHelper.log(
+      AuditAction.STATUS_CHANGE as any,
+      AuditEntity.TASK as any,
+      taskId,
+      task.title,
+      currentUserId,
+      {
+        description: `Relecture ${approved ? 'approuvée' : 'rejetée'} pour la tâche "${task.title}"`,
+        newValues: {
+          approved,
+          feedback,
+          reviewerId: currentUserId,
+          remainingReviewers: updatedRequestedAssignees.length
+        }
+      }
+    );
+
     // Créer une notification pour l'assigné original
     if (task.assigneeId) {
       await this.prisma.notification.create({
@@ -637,64 +804,60 @@ async transferTask(
     };
   }
 
-  // Dans TasksService, ajoutez cette méthode :
-async getTaskReviewers(taskId: string) {
-  const task = await this.prisma.task.findUnique({
-    where: { id: taskId },
-    select: {
-      requestedAssignees: true,
-      assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
+  async getTaskReviewers(taskId: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: {
+        requestedAssignees: true,
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  if (!task) {
-    throw new NotFoundException('Tâche non trouvée');
-  }
+    if (!task) {
+      throw new NotFoundException('Tâche non trouvée');
+    }
 
-  // Si pas de relecteurs, retourner un tableau vide
-  if (!task.requestedAssignees || task.requestedAssignees.length === 0) {
+    if (!task.requestedAssignees || task.requestedAssignees.length === 0) {
+      return {
+        taskId,
+        assignee: task.assignee,
+        reviewers: [],
+        total: 0,
+      };
+    }
+
+    const reviewers = await this.prisma.user.findMany({
+      where: {
+        id: {
+          in: task.requestedAssignees,
+        },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        role: true,
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
     return {
       taskId,
       assignee: task.assignee,
-      reviewers: [],
-      total: 0,
+      reviewers,
+      total: reviewers.length,
     };
   }
-
-  // Récupérer les informations des relecteurs
-  const reviewers = await this.prisma.user.findMany({
-    where: {
-      id: {
-        in: task.requestedAssignees,
-      },
-    },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      role: true,
-      department: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
-  });
-
-  return {
-    taskId,
-    assignee: task.assignee,
-    reviewers,
-    total: reviewers.length,
-  };
 }
-
-} 

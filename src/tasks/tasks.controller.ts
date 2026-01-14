@@ -1,31 +1,32 @@
+// src/tasks/tasks.controller.ts
 import { Controller, Get, Post, Body, Patch, Param, Delete, Query, Req, UseGuards } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
 import { TransferTaskDto } from './dto/transfer-task.dto';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('tasks')
+@ApiBearerAuth('JWT-auth')
 @Controller('tasks')
 @UseGuards(AuthGuard)
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
-  // @Post()
-  // create(@Body() dto: CreateTaskDto) {
-  //   return this.tasksService.create(dto);
-  // }
   @Post()
-create(@Body() dto: CreateTaskDto, @Req() req: any) {
-  //  console.log('User from request:', req.user);
-  // Ajouter l'ID de l'utilisateur connecté comme créateur
-  const createTaskDtoWithCreator = {
-    ...dto,
-    createdById: req.user.id // Assurez-vous que l'auth est configurée
-  };
-  return this.tasksService.create(createTaskDtoWithCreator);
-}
+  @ApiOperation({ summary: 'Créer une nouvelle tâche' })
+  create(@Body() dto: CreateTaskDto, @Req() req: any) {
+    // Ajouter l'ID de l'utilisateur connecté comme créateur
+    const createTaskDtoWithCreator = {
+      ...dto,
+      createdById: req.user.id
+    };
+    return this.tasksService.create(createTaskDtoWithCreator);
+  }
 
   @Get()
+  @ApiOperation({ summary: 'Récupérer toutes les tâches avec filtres' })
   findAll(
     @Query('status') status?: string,
     @Query('assigneeId') assigneeId?: string,
@@ -35,20 +36,27 @@ create(@Body() dto: CreateTaskDto, @Req() req: any) {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Récupérer une tâche par son ID' })
   findOne(@Param('id') id: string) {
     return this.tasksService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
-    return this.tasksService.update(id, dto);
+  @ApiOperation({ summary: 'Mettre à jour une tâche' })
+  update(@Param('id') id: string, @Body() dto: UpdateTaskDto, @Req() req: any) {
+    const userId = req.user.id;
+    return this.tasksService.update(id, dto, userId);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.tasksService.remove(id);
+  @ApiOperation({ summary: 'Supprimer une tâche' })
+  remove(@Param('id') id: string, @Req() req: any) {
+    const userId = req.user.id;
+    return this.tasksService.remove(id, userId);
   }
+
   @Get('list/:listId')
+  @ApiOperation({ summary: 'Récupérer les tâches d\'une liste' })
   async getTasksByList(
     @Param('listId') listId: string,
     @Query('page') page: number = 1,
@@ -64,15 +72,19 @@ create(@Body() dto: CreateTaskDto, @Req() req: any) {
     });
   }
 
-    @Patch(':id/assign')
+  @Patch(':id/assign')
+  @ApiOperation({ summary: 'Assigner une tâche à un utilisateur' })
   async assignTask(
     @Param('id') id: string,
-    @Body() body: { assigneeId: string }
+    @Body() body: { assigneeId: string },
+    @Req() req: any
   ) {
-    return this.tasksService.update(id, { assigneeId: body.assigneeId });
+    const userId = req.user.id;
+    return this.tasksService.assignTask(id, body.assigneeId, userId);
   }
 
   @Patch(':id/transfer')
+  @ApiOperation({ summary: 'Transférer une tâche pour relecture ou prise en charge' })
   async transferTask(
     @Param('id') id: string,
     @Body() transferTaskDto: TransferTaskDto,
@@ -86,22 +98,23 @@ create(@Body() dto: CreateTaskDto, @Req() req: any) {
   }
 
   @Patch(':id/complete-review')
-async completeReview(
-  @Param('id') id: string,
-  @Body() body: { approved: boolean; feedback?: string },
-  @Req() req: any
-) {
-  return this.tasksService.completeReview(
-    id,
-    req.user.id,
-    body.approved,
-    body.feedback
-  );
-}
+  @ApiOperation({ summary: 'Compléter une relecture' })
+  async completeReview(
+    @Param('id') id: string,
+    @Body() body: { approved: boolean; feedback?: string },
+    @Req() req: any
+  ) {
+    return this.tasksService.completeReview(
+      id,
+      req.user.id,
+      body.approved,
+      body.feedback
+    );
+  }
 
-@Get(':id/reviewers')
-async getReviewers(@Param('id') id: string) {
-  return this.tasksService.getTaskReviewers(id);
-}
-
+  @Get(':id/reviewers')
+  @ApiOperation({ summary: 'Récupérer les relecteurs d\'une tâche' })
+  async getReviewers(@Param('id') id: string) {
+    return this.tasksService.getTaskReviewers(id);
+  }
 }
