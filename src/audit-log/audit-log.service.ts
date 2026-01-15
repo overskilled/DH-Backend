@@ -44,7 +44,7 @@ export class AuditLogService {
     try {
       this.logger.log(`Recherche logs avec DTO: ${JSON.stringify(searchDto)}`);
 
-      // Extraire les paramètres avec valeurs par défaut
+      // Valeurs par défaut sécurisées
       const page = searchDto.page ? Number(searchDto.page) : 1;
       const limit = searchDto.limit ? Number(searchDto.limit) : 20;
       const skip = (page - 1) * limit;
@@ -52,14 +52,26 @@ export class AuditLogService {
       // Construction de la clause WHERE de manière sécurisée
       const where: any = { isSensitive: false };
 
-      // Filtre action
+      // Filtre action - CORRECTION : Vérifier si c'est une valeur valide de AuditAction
       if (searchDto.action && searchDto.action.trim() !== '') {
-        where.action = searchDto.action;
+        const actionValue = searchDto.action.trim();
+        // Vérifier si la valeur fait partie de l'enum AuditAction
+        if (Object.values(AuditAction).includes(actionValue as AuditAction)) {
+          where.action = actionValue as AuditAction;
+        } else {
+          this.logger.warn(`Action invalide ignorée: ${actionValue}`);
+        }
       }
 
-      // Filtre entity
+      // Filtre entity - CORRECTION : Vérifier si c'est une valeur valide de AuditEntity
       if (searchDto.entity && searchDto.entity.trim() !== '') {
-        where.entity = searchDto.entity;
+        const entityValue = searchDto.entity.trim();
+        // Vérifier si la valeur fait partie de l'enum AuditEntity
+        if (Object.values(AuditEntity).includes(entityValue as AuditEntity)) {
+          where.entity = entityValue as AuditEntity;
+        } else {
+          this.logger.warn(`Entité invalide ignorée: ${entityValue}`);
+        }
       }
 
       // Filtre entityId
@@ -139,13 +151,37 @@ export class AuditLogService {
       this.logger.error(error.stack);
       
       // Retourner une réponse vide mais valide pour éviter l'erreur 500
+      const page = searchDto.page ? Number(searchDto.page) : 1;
+      const limit = searchDto.limit ? Number(searchDto.limit) : 20;
+      const skip = (page - 1) * limit;
+
+      const [data, total] = await Promise.all([
+        this.prisma.auditLog.findMany({
+          where: { isSensitive: false },
+          skip,
+          take: limit,
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.auditLog.count({ where: { isSensitive: false } }),
+      ]);
+
       return {
-        data: [],
+        data,
         meta: {
-          total: 0,
-          page: searchDto.page ? Number(searchDto.page) : 1,
-          limit: searchDto.limit ? Number(searchDto.limit) : 20,
-          totalPages: 0,
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
         },
       };
     }
