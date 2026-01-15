@@ -343,72 +343,150 @@ async findAll(filters: {
   // }
 
 
-  // Dans votre tasks.service.ts backend, modifiez la méthode getTasksByList :
-
+// tasks.service.ts - CORRECTION ULTIME
 async getTasksByList(listId: string, filters: any) {
+  console.log('🎯 BACKEND - Début getTasksByList');
+  console.log('listId:', listId);
+  console.log('filters:', filters);
+  console.log('userId demandé:', filters?.userId);
+
   const where: any = { listId };
 
-  console.log('🔍 getTasksByList - Filtres reçus:', filters);
+  // RÉPARATION : Vérifier si la liste existe d'abord
+  const listExists = await this.prisma.list.findUnique({
+    where: { id: listId }
+  });
+  
+  if (!listExists) {
+    console.log('❌ Liste non trouvée:', listId);
+    return [];
+  }
 
-  // CORRECTION CRITIQUE : Gérer TOUS les cas pour un utilisateur
+  // CORRECTION : On utilise toujours le userId si fourni
   if (filters?.userId) {
-    where.OR = [
-      { assigneeId: filters.userId }, // Tâches assignées à l'utilisateur
-      { requestedAssignees: { has: filters.userId } }, // Tâches où l'utilisateur est relecteur
-      { createdById: filters.userId } // Tâches créées par l'utilisateur
-    ];
-    console.log('✅ Recherche pour userId:', {
-      userId: filters.userId,
-      condition: 'assigneeId OU requestedAssignees OU createdById'
+    console.log('🔍 Filtrage pour userId:', filters.userId);
+    
+    // VÉRIFIONS d'abord ce qu'il y a dans la liste
+    const allTasksInList = await this.prisma.task.findMany({
+      where: { listId },
+      select: {
+        id: true,
+        title: true,
+        createdById: true,
+        assigneeId: true,
+        requestedAssignees: true
+      }
     });
-  } else if (filters?.assigneeId) {
-    // Garder la compatibilité avec l'ancien filtre
-    where.assigneeId = filters.assigneeId;
-    console.log('✅ Recherche pour assigneeId:', filters.assigneeId);
+    
+    console.log('📊 Toutes les tâches dans la liste:', allTasksInList.length);
+    allTasksInList.forEach((task, i) => {
+      console.log(`  ${i+1}. ${task.title}`);
+      console.log(`     créée par: ${task.createdById}`);
+      console.log(`     assignée à: ${task.assigneeId}`);
+      console.log(`     relecteurs: ${task.requestedAssignees?.join(', ') || 'aucun'}`);
+      console.log(`     userId cherché: ${filters.userId}`);
+      console.log(`     correspond? ${task.createdById === filters.userId || task.assigneeId === filters.userId || task.requestedAssignees?.includes(filters.userId)}`);
+    });
+
+    // FILTRE CORRECT
+    where.OR = [
+      { assigneeId: filters.userId },
+      { requestedAssignees: { has: filters.userId } },
+      { createdById: filters.userId }
+    ];
   }
 
   if (filters?.status) {
     where.status = this.mapStatus(filters.status);
   }
 
-  console.log('🔍 Requête Prisma where:', JSON.stringify(where, null, 2));
+  console.log('🔍 Requête Prisma finale:', JSON.stringify(where, null, 2));
 
   const tasks = await this.prisma.task.findMany({
     where,
     include: {
       assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
+        select: { id: true, firstName: true, lastName: true },
       },
-      createdBy: {  // AJOUTÉ : Inclure le créateur
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
+      createdBy: {
+        select: { id: true, firstName: true, lastName: true },
       },
     },
     orderBy: { createdAt: 'desc' },
   });
 
-  console.log('✅ Nombre de tâches trouvées:', tasks.length);
+  console.log('✅ Tâches trouvées:', tasks.length);
+  console.log('='.repeat(50));
   
-  // Debug : Afficher les détails des tâches trouvées
-  tasks.forEach((task, index) => {
-    console.log(`  ${index + 1}. ${task.title}`);
-    console.log(`     Créée par: ${task.createdById}`);
-    console.log(`     Assigné à: ${task.assigneeId}`);
-    console.log(`     Relecteurs: ${task.requestedAssignees?.length || 0}`);
-    if (task.requestedAssignees?.length > 0) {
-      console.log(`     IDs relecteurs: ${task.requestedAssignees.join(', ')}`);
-    }
-  });
-
   return tasks;
 }
+
+
+// bellow is the secone version which works at 80%
+//   async getTasksByList(listId: string, filters: any) {
+//   const where: any = { listId };
+
+//   console.log('🔍 getTasksByList - Filtres reçus:', filters);
+
+//   // CORRECTION CRITIQUE : Gérer TOUS les cas pour un utilisateur
+//   if (filters?.userId) {
+//     where.OR = [
+//       { assigneeId: filters.userId }, // Tâches assignées à l'utilisateur
+//       { requestedAssignees: { has: filters.userId } }, // Tâches où l'utilisateur est relecteur
+//       { createdById: filters.userId } // Tâches créées par l'utilisateur
+//     ];
+//     console.log('✅ Recherche pour userId:', {
+//       userId: filters.userId,
+//       condition: 'assigneeId OU requestedAssignees OU createdById'
+//     });
+//   } else if (filters?.assigneeId) {
+//     // Garder la compatibilité avec l'ancien filtre
+//     where.assigneeId = filters.assigneeId;
+//     console.log('✅ Recherche pour assigneeId:', filters.assigneeId);
+//   }
+
+//   if (filters?.status) {
+//     where.status = this.mapStatus(filters.status);
+//   }
+
+//   console.log('🔍 Requête Prisma where:', JSON.stringify(where, null, 2));
+
+//   const tasks = await this.prisma.task.findMany({
+//     where,
+//     include: {
+//       assignee: {
+//         select: {
+//           id: true,
+//           firstName: true,
+//           lastName: true,
+//         },
+//       },
+//       createdBy: {  // AJOUTÉ : Inclure le créateur
+//         select: {
+//           id: true,
+//           firstName: true,
+//           lastName: true,
+//         },
+//       },
+//     },
+//     orderBy: { createdAt: 'desc' },
+//   });
+
+//   console.log('✅ Nombre de tâches trouvées:', tasks.length);
+  
+//   // Debug : Afficher les détails des tâches trouvées
+//   tasks.forEach((task, index) => {
+//     console.log(`  ${index + 1}. ${task.title}`);
+//     console.log(`     Créée par: ${task.createdById}`);
+//     console.log(`     Assigné à: ${task.assigneeId}`);
+//     console.log(`     Relecteurs: ${task.requestedAssignees?.length || 0}`);
+//     if (task.requestedAssignees?.length > 0) {
+//       console.log(`     IDs relecteurs: ${task.requestedAssignees.join(', ')}`);
+//     }
+//   });
+
+//   return tasks;
+// }
 
   async update(id: string, updateTaskDto: UpdateTaskDto, userId: string) {
     // Récupérer la tâche avant modification pour comparer
