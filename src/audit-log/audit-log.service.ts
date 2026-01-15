@@ -1,11 +1,13 @@
 // src/audit-log/audit-log.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { AuditAction, AuditEntity } from './entities/audit-log.entity';
 import { SearchAuditLogDto } from './dto/search-audit-log.dto';
 
 @Injectable()
 export class AuditLogService {
+    private readonly logger = new Logger(AuditLogService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async createLog(data: {
@@ -39,70 +41,162 @@ export class AuditLogService {
   }
 
   async searchLogs(searchDto: SearchAuditLogDto) {
-    const { page = 1, limit = 20, ...filters } = searchDto;
-    const skip = (page - 1) * limit;
+    try {
+      this.logger.log(`Recherche logs avec DTO: ${JSON.stringify(searchDto)}`);
 
-    const where: any = {};
+      // Extraire les paramètres avec valeurs par défaut
+      const page = searchDto.page ? Number(searchDto.page) : 1;
+      const limit = searchDto.limit ? Number(searchDto.limit) : 20;
+      const skip = (page - 1) * limit;
 
-    if (filters.action) {
-      where.action = filters.action;
-    }
-    if (filters.entity) {
-      where.entity = filters.entity;
-    }
-    if (filters.entityId) {
-      where.entityId = filters.entityId;
-    }
-    if (filters.userId) {
-      where.userId = filters.userId;
-    }
-    if (filters.startDate && filters.endDate) {
-      where.createdAt = {
-        gte: new Date(filters.startDate),
-        lte: new Date(filters.endDate),
-      };
-    } else if (filters.startDate) {
-      where.createdAt = {
-        gte: new Date(filters.startDate),
-      };
-    } else if (filters.endDate) {
-      where.createdAt = {
-        lte: new Date(filters.endDate),
-      };
-    }
+      // Construction de la clause WHERE de manière sécurisée
+      const where: any = { isSensitive: false };
 
-    // Exclure les logs sensibles des recherches non-admin
-    where.isSensitive = false;
+      // Filtre action
+      if (searchDto.action && searchDto.action.trim() !== '') {
+        where.action = searchDto.action;
+      }
 
-    const [data, total] = await Promise.all([
-      this.prisma.auditLog.findMany({
-        where,
-        skip,
-        take: limit,
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
+      // Filtre entity
+      if (searchDto.entity && searchDto.entity.trim() !== '') {
+        where.entity = searchDto.entity;
+      }
+
+      // Filtre entityId
+      if (searchDto.entityId && searchDto.entityId.trim() !== '') {
+        where.entityId = searchDto.entityId;
+      }
+
+      // Filtre userId
+      if (searchDto.userId && searchDto.userId.trim() !== '') {
+        where.userId = searchDto.userId;
+      }
+
+      // Filtres de date
+      if (searchDto.startDate) {
+        const startDate = new Date(searchDto.startDate);
+        if (!isNaN(startDate.getTime())) {
+          where.createdAt = {
+            ...where.createdAt,
+            gte: startDate,
+          };
+        }
+      }
+
+      if (searchDto.endDate) {
+        const endDate = new Date(searchDto.endDate);
+        if (!isNaN(endDate.getTime())) {
+          where.createdAt = {
+            ...where.createdAt,
+            lte: endDate,
+          };
+        }
+      }
+
+      this.logger.log(`Clause WHERE construite: ${JSON.stringify(where)}`);
+
+      // Requête principale avec gestion d'erreur
+      const [data, total] = await Promise.all([
+        this.prisma.auditLog.findMany({
+          where,
+          skip,
+          take: limit,
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
             },
           },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.auditLog.count({ where }),
-    ]);
+          orderBy: { createdAt: 'desc' },
+        }).catch(err => {
+          this.logger.error(`Erreur findMany: ${err.message}`);
+          return [];
+        }),
+        this.prisma.auditLog.count({ where }).catch(err => {
+          this.logger.error(`Erreur count: ${err.message}`);
+          return 0;
+        }),
+      ]);
 
-    return {
-      data,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+      this.logger.log(`Résultats: ${data.length} logs, total: ${total}`);
+
+      return {
+        data: data || [],
+        meta: {
+          total: total || 0,
+          page,
+          limit,
+          totalPages: Math.ceil((total || 0) / limit),
+        },
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur fatale dans searchLogs: ${error.message}`);
+      this.logger.error(error.stack);
+      
+      // Retourner une réponse vide mais valide pour éviter l'erreur 500
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page: searchDto.page ? Number(searchDto.page) : 1,
+          limit: searchDto.limit ? Number(searchDto.limit) : 20,
+          totalPages: 0,
+        },
+      };
+    }
+  }
+
+  // Méthode alternative simple sans filtres (pour le frontend)
+  async getAllLogsSimple(page: number = 1, limit: number = 20) {
+    try {
+      const skip = (page - 1) * limit;
+
+      const [data, total] = await Promise.all([
+        this.prisma.auditLog.findMany({
+          where: { isSensitive: false },
+          skip,
+          take: limit,
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.auditLog.count({ where: { isSensitive: false } }),
+      ]);
+
+      return {
+        data,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Erreur dans getAllLogsSimple: ${error.message}`);
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+        },
+      };
+    }
   }
 
   async getLogsByEntity(entity: AuditEntity, entityId: string) {

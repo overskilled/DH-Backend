@@ -95,6 +95,24 @@ export class AuditLogController {
     return Object.values(AuditEntity);
   }
 
+
+  @Get('all')
+@ApiOperation({
+  summary: 'Récupérer tous les logs (sans filtres)',
+  description: 'Endpoint simple pour récupérer tous les logs sans filtres complexes'
+})
+@ApiQuery({ name: 'page', required: false, type: Number })
+@ApiQuery({ name: 'limit', required: false, type: Number })
+async getAllLogsSimple(
+  @Query('page') page?: string,
+  @Query('limit') limit?: string
+) {
+  const pageNum = page ? parseInt(page) : 1;
+  const limitNum = limit ? parseInt(limit) : 20;
+  
+  return await this.auditLogService.getAllLogsSimple(pageNum, limitNum);
+}
+
   @Post('cleanup')
 @ApiOperation({
   summary: 'Nettoyer les anciens logs',
