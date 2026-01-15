@@ -233,6 +233,9 @@ export class TasksService {
 
 
   // Dans tasks.service.ts backend, méthode findAll :
+
+
+// Dans tasks.service.ts backend, méthode findAll :
 async findAll(filters: { 
   status?: string; 
   assigneeId?: string; 
@@ -245,11 +248,12 @@ async findAll(filters: {
   if (filters.listId) where.listId = filters.listId;
   if (filters.status) where.status = this.mapStatus(filters.status);
   
-  // CORRECTION : Ajouter la logique pour userId
+  // CORRECTION : Ajouter la logique COMPLÈTE pour userId
   if (filters?.userId) {
     where.OR = [
       { assigneeId: filters.userId },
-      { requestedAssignees: { has: filters.userId } }
+      { requestedAssignees: { has: filters.userId } },
+      { createdById: filters.userId } // AJOUTÉ
     ];
   }
 
@@ -257,6 +261,13 @@ async findAll(filters: {
     where,
     include: {
       assignee: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      createdBy: { // AJOUTÉ
         select: {
           id: true,
           firstName: true,
@@ -330,22 +341,28 @@ async findAll(filters: {
   //     orderBy: { createdAt: 'desc' },
   //   });
   // }
-  async getTasksByList(listId: string, filters: any) {
+
+
+  // Dans votre tasks.service.ts backend, modifiez la méthode getTasksByList :
+
+async getTasksByList(listId: string, filters: any) {
   const where: any = { listId };
 
   console.log('🔍 getTasksByList - Filtres reçus:', filters);
 
-  // CORRECTION CRITIQUE : Gérer le userId (chercher dans assigneeId ET requestedAssignees)
+  // CORRECTION CRITIQUE : Gérer TOUS les cas pour un utilisateur
   if (filters?.userId) {
     where.OR = [
       { assigneeId: filters.userId }, // Tâches assignées à l'utilisateur
-      { requestedAssignees: { has: filters.userId } } // Tâches où l'utilisateur est relecteur
+      { requestedAssignees: { has: filters.userId } }, // Tâches où l'utilisateur est relecteur
+      { createdById: filters.userId } // Tâches créées par l'utilisateur
     ];
     console.log('✅ Recherche pour userId:', {
       userId: filters.userId,
-      condition: 'assigneeId OU requestedAssignees'
+      condition: 'assigneeId OU requestedAssignees OU createdById'
     });
   } else if (filters?.assigneeId) {
+    // Garder la compatibilité avec l'ancien filtre
     where.assigneeId = filters.assigneeId;
     console.log('✅ Recherche pour assigneeId:', filters.assigneeId);
   }
@@ -366,7 +383,7 @@ async findAll(filters: {
           lastName: true,
         },
       },
-      createdBy: {
+      createdBy: {  // AJOUTÉ : Inclure le créateur
         select: {
           id: true,
           firstName: true,
@@ -382,8 +399,12 @@ async findAll(filters: {
   // Debug : Afficher les détails des tâches trouvées
   tasks.forEach((task, index) => {
     console.log(`  ${index + 1}. ${task.title}`);
+    console.log(`     Créée par: ${task.createdById}`);
     console.log(`     Assigné à: ${task.assigneeId}`);
     console.log(`     Relecteurs: ${task.requestedAssignees?.length || 0}`);
+    if (task.requestedAssignees?.length > 0) {
+      console.log(`     IDs relecteurs: ${task.requestedAssignees.join(', ')}`);
+    }
   });
 
   return tasks;
