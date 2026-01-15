@@ -1,4 +1,4 @@
-// src/tasks/tasks.controller.ts
+// src/tasks/tasks.controller.ts - AJOUTER LE PARAMÈTRE userId
 import { Controller, Get, Post, Body, Patch, Param, Delete, Query, Req, UseGuards } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -17,7 +17,6 @@ export class TasksController {
   @Post()
   @ApiOperation({ summary: 'Créer une nouvelle tâche' })
   create(@Body() dto: CreateTaskDto, @Req() req: any) {
-    // Ajouter l'ID de l'utilisateur connecté comme créateur
     const createTaskDtoWithCreator = {
       ...dto,
       createdById: req.user.id
@@ -31,8 +30,9 @@ export class TasksController {
     @Query('status') status?: string,
     @Query('assigneeId') assigneeId?: string,
     @Query('listId') listId?: string,
+    @Query('userId') userId?: string, // NOUVEAU : Pour rechercher assigné OU relecteur
   ) {
-    return this.tasksService.findAll({ status, assigneeId, listId });
+    return this.tasksService.findAll({ status, assigneeId, listId, userId });
   }
 
   @Get(':id')
@@ -63,12 +63,23 @@ export class TasksController {
     @Query('limit') limit: number = 50,
     @Query('assigneeId') assigneeId?: string,
     @Query('status') status?: string,
+    @Query('userId') userId?: string, // NOUVEAU : Paramètre important !
   ) {
+    console.log('📥 Requête getTasksByList avec filtres:', {
+      listId,
+      page,
+      limit,
+      assigneeId,
+      status,
+      userId // Va permettre de voir les tâches en relecture
+    });
+    
     return this.tasksService.getTasksByList(listId, {
       page: Number(page),
       limit: Number(limit),
       assigneeId,
       status,
+      userId, // CORRECTION : Transmettre au service
     });
   }
 

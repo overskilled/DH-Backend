@@ -208,91 +208,186 @@ export class TasksService {
     });
   }
 
-  async findAll(filters: { status?: string; assigneeId?: string; listId?: string }) {
-    const where: any = {};
+  // async findAll(filters: { status?: string; assigneeId?: string; listId?: string }) {
+  //   const where: any = {};
 
-    if (filters.assigneeId) where.assigneeId = filters.assigneeId;
-    if (filters.listId) where.listId = filters.listId;
-    if (filters.status) where.status = this.mapStatus(filters.status);
+  //   if (filters.assigneeId) where.assigneeId = filters.assigneeId;
+  //   if (filters.listId) where.listId = filters.listId;
+  //   if (filters.status) where.status = this.mapStatus(filters.status);
 
-    return this.prisma.task.findMany({
-      where,
-      include: {
-        assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  //   return this.prisma.task.findMany({
+  //     where,
+  //     include: {
+  //       assignee: {
+  //         select: {
+  //           id: true,
+  //           firstName: true,
+  //           lastName: true,
+  //         },
+  //       },
+  //     },
+  //     orderBy: { createdAt: 'desc' },
+  //   });
+  // }
+
+
+
+  // Dans tasks.service.ts backend, méthode findAll :
+async findAll(filters: { 
+  status?: string; 
+  assigneeId?: string; 
+  listId?: string;
+  userId?: string; // AJOUTÉ
+}) {
+  const where: any = {};
+
+  if (filters.assigneeId) where.assigneeId = filters.assigneeId;
+  if (filters.listId) where.listId = filters.listId;
+  if (filters.status) where.status = this.mapStatus(filters.status);
+  
+  // CORRECTION : Ajouter la logique pour userId
+  if (filters?.userId) {
+    where.OR = [
+      { assigneeId: filters.userId },
+      { requestedAssignees: { has: filters.userId } }
+    ];
   }
 
+  return this.prisma.task.findMany({
+    where,
+    include: {
+      assignee: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+  // async getTasksByList(listId: string, filters: any) {
+  //   const where: any = { listId };
+
+  //   if (filters) {
+  //     if (filters.assigneeId) {
+  //       where.assigneeId = filters.assigneeId;
+  //     }
+      
+  //     if (filters.OR) {
+  //       where.OR = filters.OR.map((condition: any) => {
+  //         if (condition.assigneeId) {
+  //           return { assigneeId: condition.assigneeId };
+  //         }
+  //         if (condition.requestedAssignees && condition.requestedAssignees.has) {
+  //           return { 
+  //             requestedAssignees: { 
+  //               has: condition.requestedAssignees.has 
+  //             } 
+  //           };
+  //         }
+  //         return condition;
+  //       });
+  //     }
+      
+  //     if (filters.requestedAssignees) {
+  //       where.requestedAssignees = {
+  //         has: filters.requestedAssignees
+  //       };
+  //     }
+
+  //     if (filters.userId) {
+  //       where.OR = [
+  //         { assigneeId: filters.userId },
+  //         { requestedAssignees: { has: filters.userId } }
+  //       ];
+  //     }
+  //   }
+
+  //   if (filters?.status) {
+  //     where.status = this.mapStatus(filters.status);
+  //   }
+
+  //   return this.prisma.task.findMany({
+  //     where,
+  //     include: {
+  //       assignee: {
+  //         select: {
+  //           id: true,
+  //           firstName: true,
+  //           lastName: true,
+  //         },
+  //       },
+  //       createdBy: {
+  //         select: {
+  //           id: true,
+  //           firstName: true,
+  //           lastName: true,
+  //         },
+  //       },
+  //     },
+  //     orderBy: { createdAt: 'desc' },
+  //   });
+  // }
   async getTasksByList(listId: string, filters: any) {
-    const where: any = { listId };
+  const where: any = { listId };
 
-    if (filters) {
-      if (filters.assigneeId) {
-        where.assigneeId = filters.assigneeId;
-      }
-      
-      if (filters.OR) {
-        where.OR = filters.OR.map((condition: any) => {
-          if (condition.assigneeId) {
-            return { assigneeId: condition.assigneeId };
-          }
-          if (condition.requestedAssignees && condition.requestedAssignees.has) {
-            return { 
-              requestedAssignees: { 
-                has: condition.requestedAssignees.has 
-              } 
-            };
-          }
-          return condition;
-        });
-      }
-      
-      if (filters.requestedAssignees) {
-        where.requestedAssignees = {
-          has: filters.requestedAssignees
-        };
-      }
+  console.log('🔍 getTasksByList - Filtres reçus:', filters);
 
-      if (filters.userId) {
-        where.OR = [
-          { assigneeId: filters.userId },
-          { requestedAssignees: { has: filters.userId } }
-        ];
-      }
-    }
+  // CORRECTION CRITIQUE : Gérer le userId (chercher dans assigneeId ET requestedAssignees)
+  if (filters?.userId) {
+    where.OR = [
+      { assigneeId: filters.userId }, // Tâches assignées à l'utilisateur
+      { requestedAssignees: { has: filters.userId } } // Tâches où l'utilisateur est relecteur
+    ];
+    console.log('✅ Recherche pour userId:', {
+      userId: filters.userId,
+      condition: 'assigneeId OU requestedAssignees'
+    });
+  } else if (filters?.assigneeId) {
+    where.assigneeId = filters.assigneeId;
+    console.log('✅ Recherche pour assigneeId:', filters.assigneeId);
+  }
 
-    if (filters?.status) {
-      where.status = this.mapStatus(filters.status);
-    }
+  if (filters?.status) {
+    where.status = this.mapStatus(filters.status);
+  }
 
-    return this.prisma.task.findMany({
-      where,
-      include: {
-        assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        createdBy: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
+  console.log('🔍 Requête Prisma where:', JSON.stringify(where, null, 2));
+
+  const tasks = await this.prisma.task.findMany({
+    where,
+    include: {
+      assignee: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
         },
       },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
+      createdBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  console.log('✅ Nombre de tâches trouvées:', tasks.length);
+  
+  // Debug : Afficher les détails des tâches trouvées
+  tasks.forEach((task, index) => {
+    console.log(`  ${index + 1}. ${task.title}`);
+    console.log(`     Assigné à: ${task.assigneeId}`);
+    console.log(`     Relecteurs: ${task.requestedAssignees?.length || 0}`);
+  });
+
+  return tasks;
+}
 
   async update(id: string, updateTaskDto: UpdateTaskDto, userId: string) {
     // Récupérer la tâche avant modification pour comparer
