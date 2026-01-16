@@ -13,6 +13,7 @@ import { ClientsModule } from './clients/clients.module';
 // import { InvoicesModule } from '.invoices/invoices.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
+import { DashboardStatsModule } from './dashboard-stats/dashboard-stats.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
     ClientsModule,
     InvoicesModule,
     AuditLogModule,
+    DashboardStatsModule,
     // InvoicesModule,
   ],
   controllers: [AppController],
